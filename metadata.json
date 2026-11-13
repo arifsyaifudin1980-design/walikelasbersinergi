@@ -1,0 +1,6 @@
+{
+  "name": "Presensi Pintar Madrasah - Monitoring & Laporan JPG",
+  "description": "Aplikasi PWA monitoring presensi siswa madrasah, rekap otomatis, diagram lingkaran, dan generator laporan JPG individual untuk WhatsApp orang tua.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
