@@ -52,6 +52,22 @@ export function clampStr(val: string | undefined | null, maxLen: number): string
   return s.length > maxLen ? s.slice(0, maxLen) : s;
 }
 
+function stripUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefined(item)) as unknown as T;
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v !== undefined) {
+        out[k] = stripUndefined(v);
+      }
+    }
+    return out as T;
+  }
+  return value;
+}
+
 export function makeSafeId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 8);
   const raw = `${prefix}_${Date.now()}_${rand}`.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -1025,9 +1041,9 @@ export const firestoreService = {
 
       await setDoc(doc(db, 'wali_madrasah', madrasahKey), {
         madrasahKey,
-        profile: cleanProfile,
-        academicYears,
-        calendarEvents,
+        profile: stripUndefined(cleanProfile),
+        academicYears: stripUndefined(academicYears),
+        calendarEvents: stripUndefined(calendarEvents),
         updatedByUid: actorUid,
         updatedAt: serverTimestamp(),
       });
@@ -1085,6 +1101,7 @@ export const firestoreService = {
           if (!data.madrasahKey) {
             await updateDoc(doc(db, 'madrasah_config', 'main'), {
               madrasahKey,
+              updatedByUid: actorUid,
               updatedAt: serverTimestamp(),
             });
           }
@@ -1101,9 +1118,9 @@ export const firestoreService = {
       if (madrasahKey && profileToSync) {
         await setDoc(doc(db, 'wali_madrasah', madrasahKey), {
           madrasahKey,
-          profile: profileToSync,
-          academicYears: years,
-          calendarEvents: events,
+          profile: stripUndefined(profileToSync),
+          academicYears: stripUndefined(years),
+          calendarEvents: stripUndefined(events),
           updatedByUid: actorUid,
           updatedAt: serverTimestamp(),
         });
@@ -1121,12 +1138,14 @@ export const firestoreService = {
   ): Promise<string> {
     const classSecret = cls.waliSecret || generateSecretToken('cls');
     const qrToken = cls.qrToken || generateQrToken();
-    const classStudents = allStudents.filter((s) => s.classId === cls.id && s.isActive);
-    const cleanClass: SchoolClass = {
+    const classStudents = allStudents
+      .filter((s) => s.classId === cls.id && s.isActive)
+      .map((s) => stripUndefined(s));
+    const cleanClass: SchoolClass = stripUndefined({
       ...cls,
       waliSecret: classSecret,
       qrToken,
-    };
+    });
     await setDoc(doc(db, 'wali_class_bundles', classSecret), {
       classSecret,
       classId: cls.id,
@@ -1197,9 +1216,16 @@ export const firestoreService = {
           waliSecret: classSecret,
           updatedAt: serverTimestamp(),
         });
-        batch.set(
-          doc(db, 'class_qr_codes', assignedCls.id),
-          {
+        const qrRef = doc(db, 'class_qr_codes', assignedCls.id);
+        const qrSnap = await getDoc(qrRef);
+        if (qrSnap.exists()) {
+          batch.update(qrRef, {
+            homeroomTeacherName: clampStr(created.name, 160),
+            homeroomTeacherUid: clampStr(assignedCls.homeroomTeacherUid, 128),
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          batch.set(qrRef, {
             classId: assignedCls.id,
             className: clampStr(assignedCls.name, 80),
             grade: clampStr(assignedCls.grade, 20),
@@ -1210,9 +1236,8 @@ export const firestoreService = {
             createdByUid: actorUid,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
+          });
+        }
         assignedCls = {
           ...assignedCls,
           homeroomTeacherId: id,
@@ -1651,7 +1676,7 @@ export const firestoreService = {
       batch.set(doc(db, 'wali_class_bundles', waliSecret), {
         classSecret: waliSecret,
         classId: id,
-        classData: created,
+        classData: stripUndefined(created),
         students: [],
         updatedByUid: actorUid,
         updatedAt: serverTimestamp(),
@@ -2931,24 +2956,30 @@ export const firestoreService = {
       if (!madrasahKey) {
         const mainSnap = await getDoc(doc(db, 'madrasah_config', 'main'));
         madrasahKey = (mainSnap.data()?.madrasahKey as string) || generateSecretToken('mad');
-        await setDoc(
-          doc(db, 'madrasah_config', 'main'),
-          {
-            ...EMPTY_MADRASAH,
-            ...madrasah,
-            madrasahKey,
-            updatedByUid: adminUid,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
+        await setDoc(doc(db, 'madrasah_config', 'main'), {
+          name: clampStr(madrasah.name, 200),
+          nsm: clampStr(madrasah.nsm, 40),
+          npsn: clampStr(madrasah.npsn, 40),
+          address: clampStr(madrasah.address, 400),
+          phone: clampStr(madrasah.phone, 40),
+          email: clampStr(madrasah.email, 160),
+          website: clampStr(madrasah.website, 200),
+          headmasterName: clampStr(madrasah.headmasterName, 160),
+          headmasterNip: clampStr(madrasah.headmasterNip, 60),
+          city: clampStr(madrasah.city, 120),
+          logoUrl: clampStr(madrasah.logoUrl, 750000),
+          signatureNoteDefault: clampStr(madrasah.signatureNoteDefault, 500),
+          madrasahKey,
+          updatedByUid: adminUid,
+          updatedAt: serverTimestamp(),
+        });
       }
 
       await setDoc(doc(db, 'wali_madrasah', madrasahKey), {
         madrasahKey,
-        profile: { ...madrasah, madrasahKey },
-        academicYears,
-        calendarEvents,
+        profile: stripUndefined({ ...madrasah, madrasahKey }),
+        academicYears: stripUndefined(academicYears),
+        calendarEvents: stripUndefined(calendarEvents),
         updatedByUid: adminUid,
         updatedAt: serverTimestamp(),
       });

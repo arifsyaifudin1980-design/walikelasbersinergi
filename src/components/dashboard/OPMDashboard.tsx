@@ -66,29 +66,29 @@ interface OPMDashboardProps {
   correctionLogs: AttendanceCorrectionLog[];
   auditLogs: AuditLog[];
   // Student CRUD
-  onAddStudent: (student: Omit<Student, 'id'>) => void;
-  onUpdateStudent: (student: Student) => void;
-  onDeleteStudent: (id: string) => void;
+  onAddStudent: (student: Omit<Student, 'id'>) => Promise<boolean> | void;
+  onUpdateStudent: (student: Student) => Promise<boolean> | void;
+  onDeleteStudent: (id: string) => Promise<boolean> | void;
   onImportStudents: (
     students: Omit<Student, 'id'>[]
   ) => Promise<{ added: number; skipped: number }> | { added: number; skipped: number };
   // Class CRUD
-  onAddClass: (newClass: Omit<SchoolClass, 'id'>) => void;
-  onUpdateClass: (updatedClass: SchoolClass) => void;
-  onDeleteClass: (id: string) => void;
+  onAddClass: (newClass: Omit<SchoolClass, 'id'>) => Promise<boolean> | void;
+  onUpdateClass: (updatedClass: SchoolClass) => Promise<boolean> | void;
+  onDeleteClass: (id: string) => Promise<boolean> | void;
   onRegenerateClassQr?: (schoolClass: SchoolClass) => Promise<void>;
   // Academic Year CRUD
-  onAddAcademicYear: (year: Omit<AcademicYear, 'id'>) => void;
-  onSetActiveAcademicYear: (id: string) => void;
-  onDeleteAcademicYear: (id: string) => void;
+  onAddAcademicYear: (year: Omit<AcademicYear, 'id'>) => Promise<boolean> | void;
+  onSetActiveAcademicYear: (id: string) => Promise<boolean> | void;
+  onDeleteAcademicYear: (id: string) => Promise<boolean> | void;
   // Calendar CRUD
-  onAddCalendarEvent: (event: Omit<AcademicCalendarEvent, 'id'>) => void;
-  onUpdateCalendarEvent: (event: AcademicCalendarEvent) => void;
-  onDeleteCalendarEvent: (id: string) => void;
+  onAddCalendarEvent: (event: Omit<AcademicCalendarEvent, 'id'>) => Promise<boolean> | void;
+  onUpdateCalendarEvent: (event: AcademicCalendarEvent) => Promise<boolean> | void;
+  onDeleteCalendarEvent: (id: string) => Promise<boolean> | void;
   // User CRUD
-  onAddUser: (user: Omit<User, 'id'>) => void;
-  onUpdateUser: (user: User) => void;
-  onDeleteUser: (id: string) => void;
+  onAddUser: (user: Omit<User, 'id'>) => Promise<boolean> | void;
+  onUpdateUser: (user: User) => Promise<boolean> | void;
+  onDeleteUser: (id: string) => Promise<boolean> | void;
 }
 
 export const OPMDashboard: React.FC<OPMDashboardProps> = ({
@@ -249,23 +249,28 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
     setStudentModalOpen(true);
   };
 
-  const handleSaveStudent = (e: React.FormEvent) => {
+  const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!studentForm.name.trim() || !studentForm.nis.trim() || !studentForm.classId) return;
     if (editingStudent) {
-      onUpdateStudent({
+      const ok = await onUpdateStudent({
         ...editingStudent,
         ...studentForm,
       });
-      showNotice(`Data siswa "${studentForm.name}" diperbarui.`);
+      if (ok !== false) {
+        showNotice(`Data siswa "${studentForm.name}" diperbarui.`);
+        setStudentModalOpen(false);
+      }
     } else {
-      onAddStudent({
+      const ok = await onAddStudent({
         ...studentForm,
         isActive: true,
       });
-      showNotice(`Siswa "${studentForm.name}" berhasil ditambahkan.`);
+      if (ok !== false) {
+        showNotice(`Siswa "${studentForm.name}" berhasil ditambahkan.`);
+        setStudentModalOpen(false);
+      }
     }
-    setStudentModalOpen(false);
   };
 
   const handleDownloadStudentTemplate = () => {
@@ -363,14 +368,14 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
     setClassModalOpen(true);
   };
 
-  const handleSaveClass = (e: React.FormEvent) => {
+  const handleSaveClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!classForm.name.trim()) return;
     const teacher = users.find((u) => u.id === classForm.homeroomTeacherId);
     const homeroomTeacherName = teacher ? teacher.name : '';
 
     if (editingClass) {
-      onUpdateClass({
+      const ok = await onUpdateClass({
         ...editingClass,
         name: classForm.name.trim(),
         grade: classForm.grade,
@@ -378,9 +383,12 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
         homeroomTeacherId: classForm.homeroomTeacherId,
         homeroomTeacherName,
       });
-      showNotice(`Kelas "${classForm.name}" diperbarui.`);
+      if (ok !== false) {
+        showNotice(`Kelas "${classForm.name}" diperbarui.`);
+        setClassModalOpen(false);
+      }
     } else {
-      onAddClass({
+      const ok = await onAddClass({
         name: classForm.name.trim(),
         grade: classForm.grade,
         academicYearId: classForm.academicYearId,
@@ -388,18 +396,22 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
         homeroomTeacherName,
         isActive: true,
       });
-      showNotice(`Kelas "${classForm.name}" ditambahkan.`);
+      if (ok !== false) {
+        showNotice(`Kelas "${classForm.name}" ditambahkan.`);
+        setClassModalOpen(false);
+      }
     }
-    setClassModalOpen(false);
   };
 
   // === ACADEMIC YEAR HANDLERS ===
-  const handleSaveYear = (e: React.FormEvent) => {
+  const handleSaveYear = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!yearForm.year.trim()) return;
-    onAddAcademicYear(yearForm);
-    setYearModalOpen(false);
-    showNotice(`Tahun Pelajaran ${yearForm.year} Semester ${yearForm.semester} ditambahkan.`);
+    const ok = await onAddAcademicYear(yearForm);
+    if (ok !== false) {
+      setYearModalOpen(false);
+      showNotice(`Tahun Pelajaran ${yearForm.year} Semester ${yearForm.semester} ditambahkan.`);
+    }
   };
 
   // === CALENDAR HANDLERS ===
@@ -425,17 +437,22 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
     setEventModalOpen(true);
   };
 
-  const handleSaveEvent = (e: React.FormEvent) => {
+  const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!eventForm.title.trim() || !eventForm.date) return;
     if (editingEvent) {
-      onUpdateCalendarEvent({ ...editingEvent, ...eventForm });
-      showNotice(`Agenda "${eventForm.title}" diperbarui.`);
+      const ok = await onUpdateCalendarEvent({ ...editingEvent, ...eventForm });
+      if (ok !== false) {
+        showNotice(`Agenda "${eventForm.title}" diperbarui.`);
+        setEventModalOpen(false);
+      }
     } else {
-      onAddCalendarEvent(eventForm);
-      showNotice(`Agenda "${eventForm.title}" ditambahkan.`);
+      const ok = await onAddCalendarEvent(eventForm);
+      if (ok !== false) {
+        showNotice(`Agenda "${eventForm.title}" ditambahkan.`);
+        setEventModalOpen(false);
+      }
     }
-    setEventModalOpen(false);
   };
 
   const generateRandomPin = () => String(Math.floor(100000 + Math.random() * 900000));
@@ -493,7 +510,7 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
     }
   };
 
-  const handleSaveUser = (e: React.FormEvent) => {
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userForm.name.trim()) return;
     const rawUsername =
@@ -512,7 +529,7 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
         : '';
     const cleanEmail = userForm.email.trim();
     if (editingUser) {
-      onUpdateUser({
+      const ok = await onUpdateUser({
         ...editingUser,
         ...userForm,
         username: cleanUsername,
@@ -520,18 +537,23 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
         email: cleanEmail,
         assignedClassId: userForm.role === 'wali_kelas' ? userForm.assignedClassId : undefined,
       });
-      showNotice(`Akun "${userForm.name}" diperbarui.`);
+      if (ok !== false) {
+        showNotice(`Akun "${userForm.name}" diperbarui.`);
+        setUserModalOpen(false);
+      }
     } else {
-      onAddUser({
+      const ok = await onAddUser({
         ...userForm,
         username: cleanUsername,
         accessPin: cleanPin,
         email: cleanEmail,
         assignedClassId: userForm.role === 'wali_kelas' ? userForm.assignedClassId : undefined,
       });
-      showNotice(`Akun "${userForm.name}" berhasil dibuat.`);
+      if (ok !== false) {
+        showNotice(`Akun "${userForm.name}" berhasil dibuat.`);
+        setUserModalOpen(false);
+      }
     }
-    setUserModalOpen(false);
   };
 
   // Checklist for initial empty state setup
@@ -1331,9 +1353,9 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              onDeleteStudent(s.id);
-                              showNotice(`Siswa "${s.name}" dihapus.`);
+                            onClick={async () => {
+                              const ok = await onDeleteStudent(s.id);
+                              if (ok !== false) showNotice(`Siswa "${s.name}" dihapus.`);
                             }}
                             className="p-2 text-slate-500 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
                             title="Hapus Siswa"
@@ -1400,9 +1422,9 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  onDeleteStudent(s.id);
-                                  showNotice(`Siswa "${s.name}" dihapus.`);
+                                onClick={async () => {
+                                  const ok = await onDeleteStudent(s.id);
+                                  if (ok !== false) showNotice(`Siswa "${s.name}" dihapus.`);
                                 }}
                                 className="p-1.5 text-slate-500 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
                                 title="Hapus Siswa"
@@ -1510,9 +1532,9 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              onDeleteClass(cls.id);
-                              showNotice(`Kelas "${cls.name}" dihapus.`);
+                            onClick={async () => {
+                              const ok = await onDeleteClass(cls.id);
+                              if (ok !== false) showNotice(`Kelas "${cls.name}" dihapus.`);
                             }}
                             className="p-2 text-slate-500 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
                             title="Hapus Kelas"
@@ -1589,9 +1611,9 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  onDeleteClass(cls.id);
-                                  showNotice(`Kelas "${cls.name}" dihapus.`);
+                                onClick={async () => {
+                                  const ok = await onDeleteClass(cls.id);
+                                  if (ok !== false) showNotice(`Kelas "${cls.name}" dihapus.`);
                                 }}
                                 className="p-1.5 text-slate-500 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
                                 title="Hapus Kelas"
@@ -1825,9 +1847,9 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            onDeleteCalendarEvent(ev.id);
-                            showNotice(`Agenda "${ev.title}" dihapus.`);
+                          onClick={async () => {
+                            const ok = await onDeleteCalendarEvent(ev.id);
+                            if (ok !== false) showNotice(`Agenda "${ev.title}" dihapus.`);
                           }}
                           className="p-2 text-slate-500 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
                           title="Hapus Agenda"
@@ -1888,9 +1910,9 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                onDeleteCalendarEvent(ev.id);
-                                showNotice(`Agenda "${ev.title}" dihapus.`);
+                              onClick={async () => {
+                                const ok = await onDeleteCalendarEvent(ev.id);
+                                if (ok !== false) showNotice(`Agenda "${ev.title}" dihapus.`);
                               }}
                               className="p-1.5 text-slate-500 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
                               title="Hapus Agenda"
@@ -1971,9 +1993,9 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                       {!isSelf && (
                         <button
                           type="button"
-                          onClick={() => {
-                            onDeleteUser(u.id);
-                            showNotice(`Akun "${u.name}" dihapus.`);
+                          onClick={async () => {
+                            const ok = await onDeleteUser(u.id);
+                            if (ok !== false) showNotice(`Akun "${u.name}" dihapus.`);
                           }}
                           className="p-2 text-slate-500 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
                           title="Hapus Akun"
@@ -2129,9 +2151,9 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                           {!isSelf && (
                             <button
                               type="button"
-                              onClick={() => {
-                                onDeleteUser(u.id);
-                                showNotice(`Akun "${u.name}" dihapus.`);
+                              onClick={async () => {
+                                const ok = await onDeleteUser(u.id);
+                                if (ok !== false) showNotice(`Akun "${u.name}" dihapus.`);
                               }}
                               className="p-1.5 text-slate-500 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
                               title="Hapus Akun"

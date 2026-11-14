@@ -592,13 +592,15 @@ export default function App() {
   }, [teachingRecords, activeClass?.id]);
 
   // Helper to wrap async cloud mutations
-  const runCloudAction = async (fn: () => Promise<unknown>) => {
+  const runCloudAction = async (fn: () => Promise<unknown>): Promise<boolean> => {
     setActionError(null);
     try {
       await fn();
+      return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Gagal menyimpan perubahan ke database cloud.';
       setActionError(msg);
+      return false;
     }
   };
 
@@ -672,9 +674,9 @@ export default function App() {
     setActiveTab(user.role === 'opm' ? 'opm_overview' : 'dashboard');
   };
 
-  const handleSaveProfile = (newProfile: MadrasahProfile) => {
-    if (!authUser) return;
-    void runCloudAction(() =>
+  const handleSaveProfile = async (newProfile: MadrasahProfile): Promise<boolean> => {
+    if (!authUser) return false;
+    return runCloudAction(() =>
       firestoreService.saveMadrasahProfile(
         newProfile,
         actorForLogs,
@@ -685,25 +687,25 @@ export default function App() {
     );
   };
 
-  const handleAddStudent = (newStudent: Omit<Student, 'id'>) => {
-    if (!authUser) return;
-    void runCloudAction(async () => {
+  const handleAddStudent = async (newStudent: Omit<Student, 'id'>): Promise<boolean> => {
+    if (!authUser) return false;
+    return runCloudAction(async () => {
       await firestoreService.addStudent(newStudent, classes, students, actorForLogs, authUser.uid);
     });
   };
 
-  const handleUpdateStudent = (student: Student) => {
-    if (!authUser) return;
-    void runCloudAction(() =>
+  const handleUpdateStudent = async (student: Student): Promise<boolean> => {
+    if (!authUser) return false;
+    return runCloudAction(() =>
       firestoreService.updateStudent(student, classes, students, actorForLogs, authUser.uid)
     );
   };
 
-  const handleDeleteStudent = (id: string) => {
-    if (!authUser) return;
+  const handleDeleteStudent = async (id: string): Promise<boolean> => {
+    if (!authUser) return false;
     const target = students.find((s) => s.id === id);
-    if (!target) return;
-    void runCloudAction(() =>
+    if (!target) return false;
+    return runCloudAction(() =>
       firestoreService.deleteStudent(target, classes, students, actorForLogs, authUser.uid)
     );
   };
@@ -726,9 +728,9 @@ export default function App() {
     }
   };
 
-  const handleAddClass = (newClass: Omit<SchoolClass, 'id'>) => {
-    if (!authUser) return;
-    void runCloudAction(async () => {
+  const handleAddClass = async (newClass: Omit<SchoolClass, 'id'>): Promise<boolean> => {
+    if (!authUser) return false;
+    return runCloudAction(async () => {
       const created = await firestoreService.addClass(
         newClass,
         users,
@@ -743,9 +745,9 @@ export default function App() {
     });
   };
 
-  const handleUpdateClass = (updatedClass: SchoolClass) => {
-    if (!authUser) return;
-    void runCloudAction(() =>
+  const handleUpdateClass = async (updatedClass: SchoolClass): Promise<boolean> => {
+    if (!authUser) return false;
+    return runCloudAction(() =>
       firestoreService.updateClass(
         updatedClass,
         users,
@@ -760,11 +762,11 @@ export default function App() {
     );
   };
 
-  const handleDeleteClass = (id: string) => {
-    if (!authUser) return;
+  const handleDeleteClass = async (id: string): Promise<boolean> => {
+    if (!authUser) return false;
     const target = classes.find((c) => c.id === id);
-    if (!target) return;
-    void runCloudAction(() =>
+    if (!target) return false;
+    return runCloudAction(() =>
       firestoreService.deleteClass(target, actorForLogs, authUser.uid)
     );
   };
@@ -782,9 +784,9 @@ export default function App() {
     });
   };
 
-  const handleAddAcademicYear = (year: Omit<AcademicYear, 'id'>) => {
-    if (!authUser) return;
-    void runCloudAction(() =>
+  const handleAddAcademicYear = async (year: Omit<AcademicYear, 'id'>): Promise<boolean> => {
+    if (!authUser) return false;
+    return runCloudAction(() =>
       firestoreService.addAcademicYear(
         year,
         academicYears,
@@ -796,9 +798,9 @@ export default function App() {
     );
   };
 
-  const handleSetActiveAcademicYear = (id: string) => {
-    if (!authUser) return;
-    void runCloudAction(() =>
+  const handleSetActiveAcademicYear = async (id: string): Promise<boolean> => {
+    if (!authUser) return false;
+    return runCloudAction(() =>
       firestoreService.setActiveAcademicYear(
         id,
         academicYears,
@@ -810,11 +812,11 @@ export default function App() {
     );
   };
 
-  const handleDeleteAcademicYear = (id: string) => {
-    if (!authUser) return;
+  const handleDeleteAcademicYear = async (id: string): Promise<boolean> => {
+    if (!authUser) return false;
     const target = academicYears.find((y) => y.id === id);
-    if (!target) return;
-    void runCloudAction(() =>
+    if (!target) return false;
+    return runCloudAction(() =>
       firestoreService.deleteAcademicYear(
         target,
         academicYears,
@@ -826,9 +828,11 @@ export default function App() {
     );
   };
 
-  const handleAddCalendarEvent = (event: Omit<AcademicCalendarEvent, 'id'>) => {
-    if (!authUser) return;
-    void runCloudAction(() =>
+  const handleAddCalendarEvent = async (
+    event: Omit<AcademicCalendarEvent, 'id'>
+  ): Promise<boolean> => {
+    if (!authUser) return false;
+    return runCloudAction(() =>
       firestoreService.addCalendarEvent(
         event,
         academicYears,
@@ -840,9 +844,9 @@ export default function App() {
     );
   };
 
-  const handleUpdateCalendarEvent = (event: AcademicCalendarEvent) => {
-    if (!authUser) return;
-    void runCloudAction(() =>
+  const handleUpdateCalendarEvent = async (event: AcademicCalendarEvent): Promise<boolean> => {
+    if (!authUser) return false;
+    return runCloudAction(() =>
       firestoreService.updateCalendarEvent(
         event,
         academicYears,
@@ -854,11 +858,11 @@ export default function App() {
     );
   };
 
-  const handleDeleteCalendarEvent = (id: string) => {
-    if (!authUser) return;
+  const handleDeleteCalendarEvent = async (id: string): Promise<boolean> => {
+    if (!authUser) return false;
     const target = calendarEvents.find((e) => e.id === id);
-    if (!target) return;
-    void runCloudAction(() =>
+    if (!target) return false;
+    return runCloudAction(() =>
       firestoreService.deleteCalendarEvent(
         target,
         academicYears,
@@ -870,9 +874,9 @@ export default function App() {
     );
   };
 
-  const handleAddUser = (user: Omit<User, 'id'>) => {
-    if (!authUser) return;
-    void runCloudAction(async () => {
+  const handleAddUser = async (user: Omit<User, 'id'>): Promise<boolean> => {
+    if (!authUser) return false;
+    return runCloudAction(async () => {
       await firestoreService.addUser(user, actorForLogs, authUser.uid, {
         classes,
         students,
@@ -881,10 +885,10 @@ export default function App() {
     });
   };
 
-  const handleUpdateUser = (user: User) => {
-    if (!authUser) return;
+  const handleUpdateUser = async (user: User): Promise<boolean> => {
+    if (!authUser) return false;
     const previous = users.find((u) => u.id === user.id);
-    void runCloudAction(() =>
+    return runCloudAction(() =>
       firestoreService.updateUser(user, previous, actorForLogs, authUser.uid, {
         classes,
         students,
@@ -893,11 +897,11 @@ export default function App() {
     );
   };
 
-  const handleDeleteUser = (id: string) => {
-    if (!authUser) return;
+  const handleDeleteUser = async (id: string): Promise<boolean> => {
+    if (!authUser) return false;
     const target = users.find((u) => u.id === id);
-    if (!target) return;
-    void runCloudAction(() =>
+    if (!target) return false;
+    return runCloudAction(() =>
       firestoreService.deleteUser(target, actorForLogs, authUser.uid)
     );
   };

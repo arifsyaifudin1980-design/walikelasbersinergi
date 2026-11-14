@@ -5,7 +5,7 @@ import { readAndCompressImage } from '../../utils/imageUpload';
 
 interface MadrasahProfileModalProps {
   profile: MadrasahProfile;
-  onSave: (profile: MadrasahProfile) => void;
+  onSave: (profile: MadrasahProfile) => Promise<boolean> | void;
   onClose: () => void;
 }
 
@@ -35,10 +35,12 @@ export const MadrasahProfileModal: React.FC<MadrasahProfileModalProps> = ({
     e.target.value = '';
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(formData);
-    onClose();
+    const ok = await onSave(formData);
+    if (ok !== false) {
+      onClose();
+    }
   };
 
   return (

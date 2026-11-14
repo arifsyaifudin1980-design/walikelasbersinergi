@@ -13,7 +13,7 @@ import { readAndCompressImage } from '../../utils/imageUpload';
 
 interface MadrasahSettingsViewProps {
   profile: MadrasahProfile;
-  onSave: (profile: MadrasahProfile) => void;
+  onSave: (profile: MadrasahProfile) => Promise<boolean> | void;
   onResetAllData: () => void;
 }
 
@@ -47,9 +47,11 @@ export const MadrasahSettingsView: React.FC<MadrasahSettingsViewProps> = ({
       const { dataUrl } = await readAndCompressImage(file, 480, 480, 0.9);
       const updated = { ...formData, logoUrl: dataUrl };
       setFormData(updated);
-      onSave(updated);
-      setSavedBanner(true);
-      setTimeout(() => setSavedBanner(false), 3000);
+      const ok = await onSave(updated);
+      if (ok !== false) {
+        setSavedBanner(true);
+        setTimeout(() => setSavedBanner(false), 3000);
+      }
     } catch {
       setUploadError('Gagal membaca berkas gambar. Silakan pilih file lain.');
     }
@@ -68,19 +70,23 @@ export const MadrasahSettingsView: React.FC<MadrasahSettingsViewProps> = ({
     if (file) processLogoFile(file);
   };
 
-  const handleRemoveLogo = () => {
+  const handleRemoveLogo = async () => {
     const updated = { ...formData, logoUrl: '' };
     setFormData(updated);
-    onSave(updated);
-    setSavedBanner(true);
-    setTimeout(() => setSavedBanner(false), 3000);
+    const ok = await onSave(updated);
+    if (ok !== false) {
+      setSavedBanner(true);
+      setTimeout(() => setSavedBanner(false), 3000);
+    }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(formData);
-    setSavedBanner(true);
-    setTimeout(() => setSavedBanner(false), 3000);
+    const ok = await onSave(formData);
+    if (ok !== false) {
+      setSavedBanner(true);
+      setTimeout(() => setSavedBanner(false), 3000);
+    }
   };
 
   return (

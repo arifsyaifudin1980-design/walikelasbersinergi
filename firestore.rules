@@ -608,7 +608,8 @@ service cloud.firestore {
         incoming().createdByUid == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        exists(/databases/$(database)/documents/classes/$(qrId));
+        (exists(/databases/$(database)/documents/classes/$(qrId)) ||
+          existsAfter(/databases/$(database)/documents/classes/$(qrId)));
       allow update: if isVerifiedUser() && isValidId(qrId) && isValidClassQrCode(incoming()) &&
         incoming().classId == existing().classId &&
         incoming().createdByUid == existing().createdByUid &&
@@ -660,7 +661,8 @@ service cloud.firestore {
           (isVerifiedUser() &&
             incoming().recordedByUid == request.auth.uid &&
             (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId))) ||
-          (!isSignedIn() && hasValidWaliSecretForClass(incoming().classId, incoming().waliSecret))
+          (!isSignedIn() && 'waliSecret' in incoming() &&
+            hasValidWaliSecretForClass(incoming().classId, incoming().waliSecret))
         );
       allow update: if isValidId(recordId) && isValidDailyAttendance(incoming()) &&
         incoming().id == existing().id &&
@@ -673,14 +675,16 @@ service cloud.firestore {
             incoming().recordedByUid == existing().recordedByUid &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'status', 'note', 'attachmentUrl', 'attachmentName', 'attachmentUploadedAt',
-              'homeroomTeacherEmail', 'recordedBy', 'updatedAt'
+              'homeroomTeacherEmail', 'recordedBy', 'waliSecret', 'updatedAt'
             ])) ||
           (isVerifiedUser() && isBoundStaff() && boundClassId() == existing().classId &&
             incoming().recordedByUid == existing().recordedByUid &&
             incoming().diff(existing()).affectedKeys().hasOnly([
-              'status', 'note', 'attachmentUrl', 'attachmentName', 'attachmentUploadedAt', 'updatedAt'
+              'status', 'note', 'attachmentUrl', 'attachmentName', 'attachmentUploadedAt',
+              'waliSecret', 'updatedAt'
             ])) ||
           (!isSignedIn() &&
+            'waliSecret' in incoming() &&
             hasValidWaliSecretForClass(existing().classId, incoming().waliSecret) &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'status', 'note', 'attachmentUrl', 'attachmentName', 'attachmentUploadedAt',
@@ -763,7 +767,8 @@ service cloud.firestore {
           (isVerifiedUser() &&
             incoming().changedByUid == request.auth.uid &&
             (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId))) ||
-          (!isSignedIn() && hasValidWaliSecretForClass(incoming().classId, incoming().waliSecret))
+          (!isSignedIn() && 'waliSecret' in incoming() &&
+            hasValidWaliSecretForClass(incoming().classId, incoming().waliSecret))
         );
       allow update: if false;
       allow delete: if isAdmin() && isValidId(logId);
@@ -780,7 +785,8 @@ service cloud.firestore {
           (isVerifiedUser() &&
             incoming().createdByUid == request.auth.uid &&
             (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId))) ||
-          (!isSignedIn() && hasValidWaliSecretForClass(incoming().classId, incoming().waliSecret))
+          (!isSignedIn() && 'waliSecret' in incoming() &&
+            hasValidWaliSecretForClass(incoming().classId, incoming().waliSecret))
         );
       allow update: if isValidId(archiveId) && isValidReportArchive(incoming()) &&
         incoming().id == existing().id &&
@@ -793,15 +799,16 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly([
               'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
               'version', 'customNote', 'deliveryStatus', 'lastDeliveredAt',
-              'homeroomTeacherEmail', 'updatedAt'
+              'homeroomTeacherEmail', 'waliSecret', 'updatedAt'
             ])) ||
           (isVerifiedUser() && isBoundStaff() && boundClassId() == existing().classId &&
             incoming().createdByUid == existing().createdByUid &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
-              'version', 'customNote', 'deliveryStatus', 'lastDeliveredAt', 'updatedAt'
+              'version', 'customNote', 'deliveryStatus', 'lastDeliveredAt', 'waliSecret', 'updatedAt'
             ])) ||
           (!isSignedIn() &&
+            'waliSecret' in incoming() &&
             hasValidWaliSecretForClass(existing().classId, incoming().waliSecret) &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
@@ -836,7 +843,7 @@ service cloud.firestore {
 
     match /wali_madrasah/{madrasahKey} {
       allow get: if isValidId(madrasahKey);
-      allow list: if false;
+      allow list: if isBootstrappedAdmin();
       allow create, update: if isAdmin() && isValidId(madrasahKey) && isValidWaliMadrasah(incoming()) &&
         incoming().madrasahKey == madrasahKey &&
         incoming().updatedAt == request.time;
@@ -845,7 +852,7 @@ service cloud.firestore {
 
     match /wali_class_bundles/{classSecret} {
       allow get: if isValidId(classSecret);
-      allow list: if false;
+      allow list: if isBootstrappedAdmin();
       allow create, update: if isAdmin() && isValidId(classSecret) && isValidWaliClassBundle(incoming()) &&
         incoming().classSecret == classSecret &&
         incoming().updatedAt == request.time;
@@ -854,7 +861,7 @@ service cloud.firestore {
 
     match /wali_attendance_months/{monthDocId} {
       allow get: if isValidId(monthDocId);
-      allow list: if false;
+      allow list: if isBootstrappedAdmin();
       allow create, update: if isValidId(monthDocId) && isValidWaliAttendanceMonth(incoming()) &&
         incoming().updatedAt == request.time &&
         monthDocId == (incoming().classSecret + '_' + incoming().yearMonth) &&
@@ -864,7 +871,7 @@ service cloud.firestore {
 
     match /wali_attachments/{attDocId} {
       allow get: if isValidId(attDocId);
-      allow list: if false;
+      allow list: if isBootstrappedAdmin();
       allow create, update: if isValidId(attDocId) && isValidWaliAttachment(incoming()) &&
         incoming().updatedAt == request.time &&
         attDocId == (incoming().classSecret + '_' + incoming().attId) &&
@@ -874,7 +881,7 @@ service cloud.firestore {
 
     match /wali_teaching_months/{monthDocId} {
       allow get: if isValidId(monthDocId);
-      allow list: if false;
+      allow list: if isBootstrappedAdmin();
       allow create, update: if isValidId(monthDocId) && isValidWaliTeachingMonth(incoming()) &&
         incoming().updatedAt == request.time &&
         monthDocId == (incoming().classId + '_' + incoming().qrToken + '_' + incoming().yearMonth) &&
@@ -888,7 +895,7 @@ service cloud.firestore {
 
     match /wali_archives/{classSecret} {
       allow get: if isValidId(classSecret);
-      allow list: if false;
+      allow list: if isBootstrappedAdmin();
       allow create, update: if isValidId(classSecret) && isValidWaliArchives(incoming()) &&
         incoming().classSecret == classSecret &&
         incoming().updatedAt == request.time &&
