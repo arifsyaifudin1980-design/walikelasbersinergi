@@ -14,7 +14,7 @@ import {
 } from '../../services/canvasReport';
 import { storageService } from '../../services/storage';
 import { shareReportToWhatsApp } from '../../services/whatsapp';
-import { MadrasahProfile, StudentMonthlyRecap } from '../../types';
+import { MadrasahProfile, ReportArchiveItem, StudentMonthlyRecap } from '../../types';
 
 interface ReportPreviewModalProps {
   recap: StudentMonthlyRecap;
@@ -26,6 +26,7 @@ interface ReportPreviewModalProps {
   semester: string;
   onClose: () => void;
   onDelivered?: () => void;
+  onSaveArchive?: (item: ReportArchiveItem) => Promise<void>;
 }
 
 export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
@@ -38,6 +39,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
   semester,
   onClose,
   onDelivered,
+  onSaveArchive,
 }) => {
   const [customNote, setCustomNote] = useState<string>('');
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
@@ -98,7 +100,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
       customNote,
     });
 
-    await storageService.saveArchiveItem({
+    const archiveItem: ReportArchiveItem = {
       id: `rep_${recap.student.id}_${recap.month}_${recap.year}`,
       studentId: recap.student.id,
       studentName: recap.student.name,
@@ -119,7 +121,12 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
       customNote,
       deliveryStatus: 'belum_dikirim',
       parentWhatsapp: recap.student.parentWhatsapp,
-    });
+    };
+    if (onSaveArchive) {
+      await onSaveArchive(archiveItem);
+    } else {
+      await storageService.saveArchiveItem(archiveItem);
+    }
     if (onDelivered) onDelivered();
   };
 
@@ -143,7 +150,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
       customNote,
     };
 
-    await storageService.saveArchiveItem({
+    const archiveItem: ReportArchiveItem = {
       id: `rep_${recap.student.id}_${recap.month}_${recap.year}`,
       studentId: recap.student.id,
       studentName: recap.student.name,
@@ -165,7 +172,12 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
       deliveryStatus: 'terkirim',
       lastDeliveredAt: new Date().toISOString(),
       parentWhatsapp: recap.student.parentWhatsapp,
-    });
+    };
+    if (onSaveArchive) {
+      await onSaveArchive(archiveItem);
+    } else {
+      await storageService.saveArchiveItem(archiveItem);
+    }
 
     const res = await shareReportToWhatsApp(payload, renderOpts);
     if (res.success) {

@@ -29,6 +29,7 @@ import {
   StudentMonthlyRecap,
   TeachingAttendanceRecord,
   User,
+  WaliSession,
 } from './types';
 import {
   EMPTY_MADRASAH,
@@ -64,6 +65,7 @@ interface ReportModalContext {
 type PortalView = 'portal' | 'scanner' | 'app';
 
 const REDIRECT_TARGET_KEY = 'ppm_post_redirect_view';
+const WALI_SESSION_KEY = 'ppm_wali_session';
 
 const TAB_META: Record<string, { title: string; section: string }> = {
   opm_overview: { title: 'Ringkasan Sistem', section: 'Utama' },
@@ -92,6 +94,20 @@ const OPM_TAB_TO_SECTION: Record<string, OPMSection> = {
   opm_audit: 'audit',
 };
 
+function readStoredWaliSession(): WaliSession | null {
+  try {
+    const raw = localStorage.getItem(WALI_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as WaliSession;
+    if (parsed && parsed.credHash && parsed.userId) {
+      return parsed;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+}
+
 export default function App() {
   // === AUTHENTICATION & ENTRY PORTAL STATE ===
   const [portalView, setPortalView] = useState<PortalView>('portal');
@@ -102,6 +118,11 @@ export default function App() {
   const [previewUserId, setPreviewUserId] = useState<string | null>(null);
   const enterAppAfterLoginRef = useRef<boolean>(false);
   const syncedQrClassIdsRef = useRef<Set<string>>(new Set());
+  const hasInitialWaliSyncRef = useRef<boolean>(false);
+
+  // === DEDICATED WALI KELAS CREDENTIAL SESSION ===
+  const [waliSession, setWaliSession] = useState<WaliSession | null>(() => readStoredWaliSession());
+  const [waliLoginError, setWaliLoginError] = useState<string | null>(null);
 
   // === CLOUD FIRESTORE REAL-TIME STATE ===
   const [madrasah, setMadrasah] = useState<MadrasahProfile>(EMPTY_MADRASAH);
@@ -119,7 +140,9 @@ export default function App() {
 
   // === NAVIGATION & PERIOD STATE ===
   const now = new Date();
-  const [activeTab, setActiveTab] = useState<string>('opm_overview');
+  const [activeTab, setActiveTab] = useState<string>(() =>
+    readStoredWaliSession() ? 'dashboard' : 'opm_overview'
+  );
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
@@ -171,16 +194,19 @@ export default function App() {
       if (!fbUser) {
         setResolvedProfile(null);
         setPreviewUserId(null);
-        setUsers([]);
-        setClasses([]);
-        setStudents([]);
-        setAcademicYears([]);
-        setCalendarEvents([]);
-        setAttendanceRecords([]);
-        setTeachingRecords([]);
-        setCorrectionLogs([]);
-        setArchives([]);
-        setAuditLogs([]);
+        hasInitialWaliSyncRef.current = false;
+        if (!readStoredWaliSession()) {
+          setUsers([]);
+          setClasses([]);
+          setStudents([]);
+          setAcademicYears([]);
+          setCalendarEvents([]);
+          setAttendanceRecords([]);
+          setTeachingRecords([]);
+          setCorrectionLogs([]);
+          setArchives([]);
+          setAuditLogs([]);
+        }
         setAuthLoading(false);
         return;
       }
@@ -207,6 +233,13 @@ export default function App() {
         setPreviewUserId(null);
 
         if (resolved.isAdmin || resolved.isBoundStaff) {
+          // Clear any previous Wali credential session so Admin/Google takes precedence
+          try {
+            localStorage.removeItem(WALI_SESSION_KEY);
+          } catch {
+            // ignore
+          }
+          setWaliSession(null);
           setActiveTab(resolved.appUser?.role === 'opm' ? 'opm_overview' : 'dashboard');
           if (enterAppAfterLoginRef.current) {
             setPortalView('app');
@@ -237,7 +270,11 @@ export default function App() {
     };
   }, []);
 
-  // Subscribe to Firestore Cloud Collections once staff session is verified
+  const isGoogleAuthorizedStaff = Boolean(
+    resolvedProfile && (resolvedProfile.isAdmin || resolvedProfile.isBoundStaff)
+  );
+
+  // Subscribe to Firestore Cloud Collections for Google Admin / Google-bound staff
   useEffect(() => {
     if (!resolvedProfile || (!resolvedProfile.isAdmin && !resolvedProfile.isBoundStaff)) {
       return;
@@ -268,6 +305,64 @@ export default function App() {
     return () => unsub();
   }, [resolvedProfile]);
 
+  // Subscribe to capability-scoped Firestore single documents for Wali Kelas credential login
+  useEffect(() => {
+    if (isGoogleAuthorizedStaff || !waliSession) {
+      return;
+    }
+
+    const unsub = firestoreService.subscribeWaliPortalData(
+      waliSession,
+      selectedMonth,
+      selectedYear,
+      {
+        onMadrasah: setMadrasah,
+        onUsers: setUsers,
+        onAcademicYears: setAcademicYears,
+        onCalendarEvents: setCalendarEvents,
+        onClasses: (list) => {
+          setClasses(list);
+          if (list[0]?.id) {
+            setSelectedClassIdForMatrix(list[0].id);
+          }
+        },
+        onStudents: setStudents,
+        onAttendance: setAttendanceRecords,
+        onTeachingAttendance: setTeachingRecords,
+        onArchives: setArchives,
+        onSessionRevoked: () => {
+          try {
+            localStorage.removeItem(WALI_SESSION_KEY);
+          } catch {
+            // ignore
+          }
+          setWaliSession(null);
+          setPortalView('portal');
+          setWaliLoginError(
+            'Sesi Wali Kelas diakhiri karena akun dinonaktifkan atau kredensial diperbarui Admin.'
+          );
+        },
+        onSessionPatch: (patch) => {
+          setWaliSession((prev) => {
+            if (!prev) return null;
+            const next: WaliSession = { ...prev, ...patch };
+            try {
+              localStorage.setItem(WALI_SESSION_KEY, JSON.stringify(next));
+            } catch {
+              // ignore
+            }
+            return next;
+          });
+        },
+        onError: (err) => {
+          setActionError(`Sinkronisasi data Wali Kelas terganggu: ${err.message}`);
+        },
+      }
+    );
+
+    return () => unsub();
+  }, [isGoogleAuthorizedStaff, waliSession, selectedMonth, selectedYear]);
+
   // Admin background sync: ensure all classes have QR registry & backfill Wali Kelas UID onto teaching records
   useEffect(() => {
     if (!resolvedProfile?.isAdmin || !authUser || classes.length === 0) return;
@@ -285,7 +380,49 @@ export default function App() {
     void firestoreService.syncMissingTeachingHomeroomUid(classes, teachingRecords);
   }, [resolvedProfile?.isAdmin, classes, teachingRecords]);
 
-  // Trigger Google Login Popup (Primary, required for AI Studio iframe & custom domains)
+  // Admin background sync: backfill capability mirrors for Wali Kelas login
+  useEffect(() => {
+    if (!resolvedProfile?.isAdmin || !authUser) return;
+    const needsSync =
+      !hasInitialWaliSyncRef.current ||
+      !madrasah.madrasahKey ||
+      classes.some((c) => !c.waliSecret) ||
+      users.some((u) => u.role === 'wali_kelas' && u.accessPin && !u.waliCredHash);
+
+    if (!needsSync) return;
+
+    const timer = setTimeout(() => {
+      hasInitialWaliSyncRef.current = true;
+      void firestoreService.ensureWaliPortalSync({
+        madrasah,
+        academicYears,
+        calendarEvents,
+        classes,
+        students,
+        users,
+        attendanceRecords,
+        teachingRecords,
+        archives,
+        adminUid: authUser.uid,
+      });
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [
+    resolvedProfile?.isAdmin,
+    authUser,
+    madrasah,
+    academicYears,
+    calendarEvents,
+    classes,
+    students,
+    users,
+    attendanceRecords,
+    teachingRecords,
+    archives,
+  ]);
+
+  // Trigger Google Login Popup (Admin)
   const handleGoogleLogin = async (enterDashboardOnSuccess: boolean) => {
     setAuthError(null);
     enterAppAfterLoginRef.current = enterDashboardOnSuccess;
@@ -301,7 +438,7 @@ export default function App() {
     }
   };
 
-  // Fallback Redirect Login when running directly on top-level custom domain (outside iframe)
+  // Fallback Redirect Login
   const handleGoogleRedirectLogin = async (targetView: 'app' | 'scanner') => {
     if (isRunningInIframe()) return;
     setAuthError(null);
@@ -318,38 +455,103 @@ export default function App() {
     }
   };
 
-  const handleSignOut = async () => {
-    enterAppAfterLoginRef.current = false;
-    await signOut(auth);
+  // Wali Kelas Credential Login (Username + PIN created by Admin)
+  const handleWaliLogin = async (username: string, accessPin: string) => {
+    setWaliLoginError(null);
+    try {
+      const res = await firestoreService.loginWaliKelasWithCredentials(username, accessPin);
+      if (!res.session) {
+        setWaliLoginError(res.reason || 'Login Wali Kelas gagal.');
+        return;
+      }
+      try {
+        localStorage.setItem(WALI_SESSION_KEY, JSON.stringify(res.session));
+      } catch {
+        // ignore
+      }
+      setWaliSession(res.session);
+      setPreviewUserId(null);
+      setActiveTab('dashboard');
+      setPortalView('app');
+    } catch (err) {
+      setWaliLoginError(
+        err instanceof Error ? err.message : 'Gagal menghubungi server untuk verifikasi.'
+      );
+    }
+  };
+
+  const handleWaliSignOut = () => {
+    try {
+      localStorage.removeItem(WALI_SESSION_KEY);
+    } catch {
+      // ignore
+    }
+    setWaliSession(null);
+    setWaliLoginError(null);
+    setClasses([]);
+    setStudents([]);
+    setAttendanceRecords([]);
+    setTeachingRecords([]);
+    setArchives([]);
     setPortalView('portal');
   };
 
-  // Effective Active User (real auth user, or Admin previewing a Wali Kelas account)
+  const handleSignOut = async () => {
+    enterAppAfterLoginRef.current = false;
+    if (authUser) {
+      await signOut(auth);
+    }
+    try {
+      localStorage.removeItem(WALI_SESSION_KEY);
+    } catch {
+      // ignore
+    }
+    setWaliSession(null);
+    setWaliLoginError(null);
+    setPortalView('portal');
+  };
+
+  // Effective Active User (Google Admin, Admin previewing a Wali, Google-Bound Wali, or Credential Wali Kelas)
   const currentUser: User = useMemo(() => {
     if (resolvedProfile?.isAdmin && previewUserId) {
       const preview = users.find((u) => u.id === previewUserId && u.isActive);
       if (preview) return preview;
     }
-    return (
-      resolvedProfile?.appUser || {
-        id: authUser?.uid || 'guest',
-        username: authUser?.email || 'user',
-        name: authUser?.displayName || 'Pengguna Madrasah',
+    if (resolvedProfile?.appUser) {
+      return resolvedProfile.appUser;
+    }
+    if (waliSession) {
+      return {
+        id: waliSession.userId,
+        username: waliSession.username,
+        name: waliSession.name,
         role: 'wali_kelas',
+        nip: waliSession.nip || '',
+        assignedClassId: waliSession.assignedClassId,
         isActive: true,
-      }
-    );
-  }, [resolvedProfile, previewUserId, users, authUser]);
+      };
+    }
+    return {
+      id: authUser?.uid || 'guest',
+      username: authUser?.email || 'user',
+      name: authUser?.displayName || 'Pengguna Madrasah',
+      role: 'wali_kelas',
+      isActive: true,
+    };
+  }, [resolvedProfile, previewUserId, users, authUser, waliSession]);
 
   const actorForLogs: User = useMemo(
     () => resolvedProfile?.appUser || currentUser,
     [resolvedProfile?.appUser, currentUser]
   );
 
+  const activeActorUid = authUser?.uid || waliSession?.userId || '';
+  const activeWaliSecret = !isGoogleAuthorizedStaff ? waliSession?.classSecret : undefined;
+
   // Resolve active class for current role
   const effectiveMatrixClassId = useMemo(() => {
     if (currentUser.role === 'wali_kelas') {
-      return currentUser.assignedClassId || '';
+      return currentUser.assignedClassId || classes[0]?.id || '';
     }
     if (selectedClassIdForMatrix && classes.some((c) => c.id === selectedClassIdForMatrix)) {
       return selectedClassIdForMatrix;
@@ -360,8 +562,8 @@ export default function App() {
   const activeClass = useMemo(() => {
     if (currentUser.role === 'wali_kelas') {
       return currentUser.assignedClassId
-        ? classes.find((c) => c.id === currentUser.assignedClassId)
-        : undefined;
+        ? classes.find((c) => c.id === currentUser.assignedClassId) || classes[0]
+        : classes[0];
     }
     return classes.find((c) => c.id === effectiveMatrixClassId);
   }, [currentUser, classes, effectiveMatrixClassId]);
@@ -414,7 +616,7 @@ export default function App() {
       removeAttachment?: boolean;
     }
   ) => {
-    if (!authUser) return;
+    if (!activeActorUid) return;
     void runCloudAction(() =>
       firestoreService.setStudentAttendance(
         studentId,
@@ -422,27 +624,44 @@ export default function App() {
         date,
         status,
         actorForLogs,
-        authUser.uid,
+        activeActorUid,
         classes,
         students,
         attendanceRecords,
-        options
+        {
+          ...options,
+          waliSecret: activeWaliSecret,
+        }
       )
     );
   };
 
   const handleBulkSetHadir = (classId: string, date: string) => {
-    if (!authUser) return;
+    if (!activeActorUid) return;
     void runCloudAction(() =>
       firestoreService.bulkSetClassAttendance(
         classId,
         date,
         'H',
         actorForLogs,
-        authUser.uid,
+        activeActorUid,
         classes,
         students,
-        attendanceRecords
+        attendanceRecords,
+        activeWaliSecret
+      )
+    );
+  };
+
+  const handleSaveArchive = async (item: ReportArchiveItem) => {
+    if (!activeActorUid) return;
+    await runCloudAction(() =>
+      firestoreService.saveArchiveItem(
+        item,
+        archives,
+        classes,
+        activeActorUid,
+        activeWaliSecret
       )
     );
   };
@@ -456,21 +675,27 @@ export default function App() {
   const handleSaveProfile = (newProfile: MadrasahProfile) => {
     if (!authUser) return;
     void runCloudAction(() =>
-      firestoreService.saveMadrasahProfile(newProfile, actorForLogs, authUser.uid)
+      firestoreService.saveMadrasahProfile(
+        newProfile,
+        actorForLogs,
+        authUser.uid,
+        academicYears,
+        calendarEvents
+      )
     );
   };
 
   const handleAddStudent = (newStudent: Omit<Student, 'id'>) => {
     if (!authUser) return;
     void runCloudAction(async () => {
-      await firestoreService.addStudent(newStudent, classes, actorForLogs, authUser.uid);
+      await firestoreService.addStudent(newStudent, classes, students, actorForLogs, authUser.uid);
     });
   };
 
   const handleUpdateStudent = (student: Student) => {
     if (!authUser) return;
     void runCloudAction(() =>
-      firestoreService.updateStudent(student, classes, actorForLogs, authUser.uid)
+      firestoreService.updateStudent(student, classes, students, actorForLogs, authUser.uid)
     );
   };
 
@@ -479,7 +704,7 @@ export default function App() {
     const target = students.find((s) => s.id === id);
     if (!target) return;
     void runCloudAction(() =>
-      firestoreService.deleteStudent(target, actorForLogs, authUser.uid)
+      firestoreService.deleteStudent(target, classes, students, actorForLogs, authUser.uid)
     );
   };
 
@@ -504,7 +729,13 @@ export default function App() {
   const handleAddClass = (newClass: Omit<SchoolClass, 'id'>) => {
     if (!authUser) return;
     void runCloudAction(async () => {
-      const created = await firestoreService.addClass(newClass, users, actorForLogs, authUser.uid);
+      const created = await firestoreService.addClass(
+        newClass,
+        users,
+        actorForLogs,
+        authUser.uid,
+        madrasah.madrasahKey
+      );
       syncedQrClassIdsRef.current.add(created.id);
       if (!selectedClassIdForMatrix) {
         setSelectedClassIdForMatrix(created.id);
@@ -523,7 +754,8 @@ export default function App() {
         teachingRecords,
         archives,
         actorForLogs,
-        authUser.uid
+        authUser.uid,
+        madrasah.madrasahKey
       )
     );
   };
@@ -540,7 +772,13 @@ export default function App() {
   const handleRegenerateClassQr = async (schoolClass: SchoolClass) => {
     if (!authUser) return;
     await runCloudAction(async () => {
-      await firestoreService.regenerateClassQr(schoolClass, actorForLogs, authUser.uid);
+      await firestoreService.regenerateClassQr(
+        schoolClass,
+        students,
+        users,
+        actorForLogs,
+        authUser.uid
+      );
     });
   };
 
@@ -552,7 +790,8 @@ export default function App() {
         academicYears,
         calendarEvents,
         actorForLogs,
-        authUser.uid
+        authUser.uid,
+        madrasah
       )
     );
   };
@@ -565,7 +804,8 @@ export default function App() {
         academicYears,
         calendarEvents,
         actorForLogs,
-        authUser.uid
+        authUser.uid,
+        madrasah
       )
     );
   };
@@ -580,7 +820,8 @@ export default function App() {
         academicYears,
         calendarEvents,
         actorForLogs,
-        authUser.uid
+        authUser.uid,
+        madrasah
       )
     );
   };
@@ -593,7 +834,8 @@ export default function App() {
         academicYears,
         calendarEvents,
         actorForLogs,
-        authUser.uid
+        authUser.uid,
+        madrasah
       )
     );
   };
@@ -606,7 +848,8 @@ export default function App() {
         academicYears,
         calendarEvents,
         actorForLogs,
-        authUser.uid
+        authUser.uid,
+        madrasah
       )
     );
   };
@@ -621,7 +864,8 @@ export default function App() {
         academicYears,
         calendarEvents,
         actorForLogs,
-        authUser.uid
+        authUser.uid,
+        madrasah
       )
     );
   };
@@ -629,14 +873,23 @@ export default function App() {
   const handleAddUser = (user: Omit<User, 'id'>) => {
     if (!authUser) return;
     void runCloudAction(async () => {
-      await firestoreService.addUser(user, actorForLogs, authUser.uid);
+      await firestoreService.addUser(user, actorForLogs, authUser.uid, {
+        classes,
+        students,
+        madrasahKey: madrasah.madrasahKey,
+      });
     });
   };
 
   const handleUpdateUser = (user: User) => {
     if (!authUser) return;
+    const previous = users.find((u) => u.id === user.id);
     void runCloudAction(() =>
-      firestoreService.updateUser(user, actorForLogs, authUser.uid)
+      firestoreService.updateUser(user, previous, actorForLogs, authUser.uid, {
+        classes,
+        students,
+        madrasahKey: madrasah.madrasahKey,
+      })
     );
   };
 
@@ -724,16 +977,15 @@ export default function App() {
   const currentMeta = TAB_META[activeTab] || { title: 'Dashboard', section: 'Aplikasi' };
   const visibleArchives = useMemo(() => {
     if (currentUser.role === 'opm') return archives;
-    if (!currentUser.assignedClassId) return [];
-    return archives.filter((a) => a.classId === currentUser.assignedClassId);
-  }, [archives, currentUser]);
+    const clsId = currentUser.assignedClassId || activeClass?.id;
+    if (!clsId) return [];
+    return archives.filter((a) => a.classId === clsId);
+  }, [archives, currentUser, activeClass?.id]);
 
-  const isAuthorizedStaff = Boolean(
-    resolvedProfile && (resolvedProfile.isAdmin || resolvedProfile.isBoundStaff)
-  );
+  const isAuthorizedSession = isGoogleAuthorizedStaff || Boolean(waliSession);
 
-  // === VIEW 1: ENTRY PORTAL (Menu Login + Menu Kamera Scan) ===
-  if (portalView === 'portal' || (portalView === 'app' && !isAuthorizedStaff)) {
+  // === VIEW 1: ENTRY PORTAL (Admin Google + Wali Kelas Akun dari Admin + Kamera Scan Guru) ===
+  if (portalView === 'portal' || (portalView === 'app' && !isAuthorizedSession)) {
     return (
       <>
         <EntryPortal
@@ -741,7 +993,7 @@ export default function App() {
           authLoading={authLoading}
           authError={authError}
           onDismissAuthError={() => setAuthError(null)}
-          isAuthorizedStaff={isAuthorizedStaff}
+          isAuthorizedStaff={isGoogleAuthorizedStaff}
           resolvedRoleLabel={
             resolvedProfile?.isAdmin
               ? 'Administrator / OPM'
@@ -754,27 +1006,31 @@ export default function App() {
             !isRunningInIframe() ? () => handleGoogleRedirectLogin('app') : undefined
           }
           onSignOut={handleSignOut}
-          onEnterDashboard={() => setPortalView('app')}
+          onEnterDashboard={() => {
+            if (!isGoogleAuthorizedStaff && waliSession) {
+              setActiveTab('dashboard');
+            }
+            setPortalView('app');
+          }}
           onOpenScanner={() => setPortalView('scanner')}
+          waliSession={waliSession}
+          waliLoginError={waliLoginError}
+          onDismissWaliError={() => setWaliLoginError(null)}
+          onWaliLogin={handleWaliLogin}
+          onWaliSignOut={handleWaliSignOut}
         />
         <OfflineIndicator />
       </>
     );
   }
 
-  // === VIEW 2: CAMERA QR SCANNER (Guru Ngajar Check-in / Check-out) ===
+  // === VIEW 2: CAMERA QR SCANNER (Guru Ngajar Check-in / Check-out — Tanpa Login Google) ===
   if (portalView === 'scanner') {
     return (
       <>
         <TeachingQRScanner
           authUser={authUser}
-          authError={authError}
-          onDismissAuthError={() => setAuthError(null)}
-          onGoogleLogin={() => handleGoogleLogin(false)}
-          onGoogleRedirectLogin={
-            !isRunningInIframe() ? () => handleGoogleRedirectLogin('scanner') : undefined
-          }
-          onBackToPortal={() => setPortalView(isAuthorizedStaff ? 'app' : 'portal')}
+          onBackToPortal={() => setPortalView(isAuthorizedSession ? 'app' : 'portal')}
         />
         <OfflineIndicator />
       </>
@@ -944,6 +1200,15 @@ export default function App() {
               onUpdateAttendance={handleUpdateAttendance}
               onBulkSetHadir={handleBulkSetHadir}
               onNavigateToMaster={setActiveTab}
+              onActiveMonthYearChange={(m, y) => {
+                setSelectedMonth(m);
+                setSelectedYear(y);
+              }}
+              onFetchAttachment={
+                !isGoogleAuthorizedStaff && waliSession?.classSecret
+                  ? (attId) => firestoreService.fetchWaliAttachment(waliSession.classSecret, attId)
+                  : undefined
+              }
             />
           )}
 
@@ -987,6 +1252,7 @@ export default function App() {
           academicYear={activeAcademicYear?.year || '-'}
           semester={activeAcademicYear?.semester || '-'}
           onClose={() => setReportModalContext(null)}
+          onSaveArchive={handleSaveArchive}
         />
       )}
 

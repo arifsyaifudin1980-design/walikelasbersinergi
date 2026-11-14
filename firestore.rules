@@ -77,7 +77,7 @@ service cloud.firestore {
         data.keys().hasOnly([
           'name', 'nsm', 'npsn', 'address', 'phone', 'email', 'website',
           'headmasterName', 'headmasterNip', 'city', 'logoUrl', 'signatureNoteDefault',
-          'updatedAt', 'updatedByUid'
+          'madrasahKey', 'updatedAt', 'updatedByUid'
         ]) &&
         isValidStr(data.name, 0, 200) &&
         (!('nsm' in data) || isValidStr(data.nsm, 0, 40)) &&
@@ -91,6 +91,7 @@ service cloud.firestore {
         (!('city' in data) || isValidStr(data.city, 0, 120)) &&
         isValidStr(data.logoUrl, 0, 750000) &&
         (!('signatureNoteDefault' in data) || isValidStr(data.signatureNoteDefault, 0, 500)) &&
+        (!('madrasahKey' in data) || isValidStr(data.madrasahKey, 0, 128)) &&
         isValidStr(data.updatedByUid, 1, 128) &&
         data.updatedAt is timestamp;
     }
@@ -106,7 +107,7 @@ service cloud.firestore {
 
     function isValidUserAccount(data) {
       return data.keys().hasAll(['id', 'username', 'name', 'role', 'email', 'isActive', 'createdByUid', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'username', 'name', 'role', 'nip', 'email', 'authUid', 'assignedClassId', 'isActive', 'createdByUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'username', 'name', 'role', 'nip', 'email', 'authUid', 'assignedClassId', 'accessPin', 'waliCredHash', 'isActive', 'createdByUid', 'createdAt', 'updatedAt']) &&
         isValidId(data.id) &&
         isValidStr(data.username, 1, 80) &&
         isValidStr(data.name, 1, 160) &&
@@ -115,6 +116,8 @@ service cloud.firestore {
         isValidStr(data.email, 0, 200) &&
         (!('authUid' in data) || isValidStr(data.authUid, 0, 128)) &&
         (!('assignedClassId' in data) || isValidStr(data.assignedClassId, 0, 128)) &&
+        (!('accessPin' in data) || isValidStr(data.accessPin, 0, 40)) &&
+        (!('waliCredHash' in data) || isValidStr(data.waliCredHash, 0, 128)) &&
         data.isActive is bool &&
         isValidStr(data.createdByUid, 1, 128) &&
         data.createdAt is timestamp &&
@@ -157,7 +160,7 @@ service cloud.firestore {
         data.keys().hasOnly([
           'id', 'name', 'grade', 'academicYearId', 'homeroomTeacherId',
           'homeroomTeacherName', 'homeroomTeacherEmail', 'homeroomTeacherUid',
-          'qrToken', 'qrGeneratedAt', 'isActive', 'createdByUid', 'createdAt', 'updatedAt'
+          'qrToken', 'qrGeneratedAt', 'waliSecret', 'isActive', 'createdByUid', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
         isValidStr(data.name, 1, 80) &&
@@ -170,6 +173,7 @@ service cloud.firestore {
         isValidId(data.qrToken) &&
         data.qrToken.size() >= 6 &&
         (!('qrGeneratedAt' in data) || isValidStr(data.qrGeneratedAt, 0, 40)) &&
+        (!('waliSecret' in data) || isValidStr(data.waliSecret, 0, 128)) &&
         data.isActive is bool &&
         isValidStr(data.createdByUid, 1, 128) &&
         data.createdAt is timestamp &&
@@ -233,7 +237,7 @@ service cloud.firestore {
         data.keys().hasOnly([
           'id', 'studentId', 'classId', 'homeroomTeacherEmail',
           'date', 'status', 'note', 'attachmentUrl', 'attachmentName',
-          'attachmentUploadedAt', 'recordedBy', 'recordedByUid', 'createdAt', 'updatedAt'
+          'attachmentUploadedAt', 'recordedBy', 'recordedByUid', 'waliSecret', 'createdAt', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
         isValidId(data.studentId) &&
@@ -247,6 +251,7 @@ service cloud.firestore {
         (!('attachmentUploadedAt' in data) || isValidStr(data.attachmentUploadedAt, 0, 40)) &&
         isValidStr(data.recordedBy, 1, 128) &&
         isValidStr(data.recordedByUid, 1, 128) &&
+        (!('waliSecret' in data) || isValidStr(data.waliSecret, 0, 128)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -287,7 +292,7 @@ service cloud.firestore {
         (!('arrivalNote' in data) || isValidStr(data.arrivalNote, 0, 500)) &&
         (!('closingNote' in data) || isValidStr(data.closingNote, 0, 500)) &&
         isValidStr(data.recordedByUid, 1, 128) &&
-        isValidStr(data.recordedByEmail, 3, 200) &&
+        isValidStr(data.recordedByEmail, 0, 200) &&
         data.arrivalAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -301,7 +306,7 @@ service cloud.firestore {
         data.keys().hasOnly([
           'id', 'studentId', 'studentName', 'classId', 'homeroomTeacherEmail',
           'date', 'previousStatus', 'newStatus', 'reason',
-          'changedBy', 'changedByName', 'changedByUid', 'timestamp', 'createdAt'
+          'changedBy', 'changedByName', 'changedByUid', 'waliSecret', 'timestamp', 'createdAt'
         ]) &&
         isValidId(data.id) &&
         isValidId(data.studentId) &&
@@ -315,6 +320,7 @@ service cloud.firestore {
         isValidStr(data.changedBy, 1, 128) &&
         isValidStr(data.changedByName, 1, 160) &&
         isValidStr(data.changedByUid, 1, 128) &&
+        (!('waliSecret' in data) || isValidStr(data.waliSecret, 0, 128)) &&
         isValidStr(data.timestamp, 1, 40) &&
         data.createdAt is timestamp;
     }
@@ -331,7 +337,7 @@ service cloud.firestore {
           'id', 'studentId', 'studentName', 'classId', 'className',
           'homeroomTeacherEmail', 'month', 'year', 'academicYear',
           'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
-          'createdAt', 'createdByName', 'createdByUid', 'version', 'customNote',
+          'createdAt', 'createdByName', 'createdByUid', 'waliSecret', 'version', 'customNote',
           'deliveryStatus', 'lastDeliveredAt', 'parentWhatsapp', 'updatedAt'
         ]) &&
         isValidId(data.id) &&
@@ -352,6 +358,7 @@ service cloud.firestore {
         isValidStr(data.createdAt, 1, 40) &&
         isValidStr(data.createdByName, 1, 160) &&
         isValidStr(data.createdByUid, 1, 128) &&
+        (!('waliSecret' in data) || isValidStr(data.waliSecret, 0, 128)) &&
         data.version is number && data.version >= 1 &&
         (!('customNote' in data) || isValidStr(data.customNote, 0, 600)) &&
         data.deliveryStatus in ['belum_dikirim', 'terkirim', 'gagal'] &&
@@ -371,6 +378,102 @@ service cloud.firestore {
         isValidStr(data.actorUid, 1, 128) &&
         isValidStr(data.timestamp, 1, 40) &&
         data.createdAt is timestamp;
+    }
+
+    function isValidWaliAccess(data) {
+      return data.keys().hasAll([
+          'credHash', 'userId', 'username', 'name', 'role',
+          'assignedClassId', 'classSecret', 'madrasahKey', 'qrToken',
+          'isActive', 'createdByUid', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'credHash', 'userId', 'username', 'name', 'nip', 'role',
+          'assignedClassId', 'classSecret', 'madrasahKey', 'qrToken', 'className',
+          'isActive', 'createdByUid', 'updatedAt'
+        ]) &&
+        isValidId(data.credHash) &&
+        isValidId(data.userId) &&
+        isValidStr(data.username, 1, 80) &&
+        isValidStr(data.name, 1, 160) &&
+        (!('nip' in data) || isValidStr(data.nip, 0, 60)) &&
+        data.role == 'wali_kelas' &&
+        isValidStr(data.assignedClassId, 0, 128) &&
+        isValidStr(data.classSecret, 0, 128) &&
+        isValidStr(data.madrasahKey, 0, 128) &&
+        isValidStr(data.qrToken, 0, 128) &&
+        (!('className' in data) || isValidStr(data.className, 0, 80)) &&
+        data.isActive is bool &&
+        isValidStr(data.createdByUid, 1, 128) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidWaliMadrasah(data) {
+      return data.keys().hasAll(['madrasahKey', 'profile', 'academicYears', 'calendarEvents', 'updatedByUid', 'updatedAt']) &&
+        data.keys().hasOnly(['madrasahKey', 'profile', 'academicYears', 'calendarEvents', 'updatedByUid', 'updatedAt']) &&
+        isValidId(data.madrasahKey) &&
+        data.profile is map &&
+        data.academicYears is list &&
+        data.calendarEvents is list &&
+        isValidStr(data.updatedByUid, 1, 128) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidWaliClassBundle(data) {
+      return data.keys().hasAll(['classSecret', 'classId', 'classData', 'students', 'updatedByUid', 'updatedAt']) &&
+        data.keys().hasOnly(['classSecret', 'classId', 'classData', 'students', 'updatedByUid', 'updatedAt']) &&
+        isValidId(data.classSecret) &&
+        isValidId(data.classId) &&
+        data.classData is map &&
+        data.students is list &&
+        isValidStr(data.updatedByUid, 1, 128) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidWaliAttendanceMonth(data) {
+      return data.keys().hasAll(['classSecret', 'classId', 'yearMonth', 'recordsMap', 'updatedAt']) &&
+        data.keys().hasOnly(['classSecret', 'classId', 'yearMonth', 'recordsMap', 'updatedAt']) &&
+        isValidId(data.classSecret) &&
+        isValidId(data.classId) &&
+        isValidStr(data.yearMonth, 7, 7) &&
+        data.recordsMap is map &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidWaliAttachment(data) {
+      return data.keys().hasAll(['classSecret', 'classId', 'attId', 'attachmentUrl', 'attachmentName', 'updatedAt']) &&
+        data.keys().hasOnly(['classSecret', 'classId', 'attId', 'attachmentUrl', 'attachmentName', 'updatedAt']) &&
+        isValidId(data.classSecret) &&
+        isValidId(data.classId) &&
+        isValidId(data.attId) &&
+        isValidStr(data.attachmentUrl, 0, 750000) &&
+        isValidStr(data.attachmentName, 0, 200) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidWaliTeachingMonth(data) {
+      return data.keys().hasAll(['classId', 'qrToken', 'yearMonth', 'sessionsMap', 'updatedAt']) &&
+        data.keys().hasOnly(['classId', 'qrToken', 'yearMonth', 'sessionsMap', 'updatedAt']) &&
+        isValidId(data.classId) &&
+        isValidId(data.qrToken) &&
+        isValidStr(data.yearMonth, 7, 7) &&
+        data.sessionsMap is map &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidWaliArchives(data) {
+      return data.keys().hasAll(['classSecret', 'classId', 'archivesMap', 'updatedAt']) &&
+        data.keys().hasOnly(['classSecret', 'classId', 'archivesMap', 'updatedAt']) &&
+        isValidId(data.classSecret) &&
+        isValidId(data.classId) &&
+        data.archivesMap is map &&
+        data.updatedAt is timestamp;
+    }
+
+    function hasValidWaliSecretForClass(classId, secret) {
+      return secret is string &&
+        secret.size() >= 16 &&
+        exists(/databases/$(database)/documents/classes/$(classId)) &&
+        get(/databases/$(database)/documents/classes/$(classId)).data.waliSecret == secret;
     }
 
     // === COLLECTION RULES ===
@@ -429,7 +532,7 @@ service cloud.firestore {
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         (
-          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['username', 'name', 'role', 'nip', 'email', 'authUid', 'assignedClassId', 'isActive', 'updatedAt'])) ||
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['username', 'name', 'role', 'nip', 'email', 'authUid', 'assignedClassId', 'accessPin', 'waliCredHash', 'isActive', 'updatedAt'])) ||
           (existing().email == request.auth.token.email && existing().isActive == true &&
             incoming().diff(existing()).affectedKeys().hasOnly(['authUid', 'updatedAt']) &&
             incoming().authUid == request.auth.uid)
@@ -488,7 +591,7 @@ service cloud.firestore {
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
             'name', 'grade', 'academicYearId', 'homeroomTeacherId',
             'homeroomTeacherName', 'homeroomTeacherEmail', 'homeroomTeacherUid',
-            'qrToken', 'qrGeneratedAt', 'isActive', 'updatedAt'
+            'qrToken', 'qrGeneratedAt', 'waliSecret', 'isActive', 'updatedAt'
           ])) ||
           (existing().homeroomTeacherEmail == request.auth.token.email &&
             incoming().diff(existing()).affectedKeys().hasOnly(['homeroomTeacherUid', 'updatedAt']) &&
@@ -498,7 +601,7 @@ service cloud.firestore {
     }
 
     match /class_qr_codes/{qrId} {
-      allow get: if isVerifiedUser() && isValidId(qrId);
+      allow get: if isValidId(qrId);
       allow list: if isBootstrappedAdmin();
       allow create: if isAdmin() && isValidId(qrId) && isValidClassQrCode(incoming()) &&
         incoming().classId == qrId &&
@@ -547,29 +650,41 @@ service cloud.firestore {
     match /daily_attendance/{recordId} {
       allow get: if isValidId(recordId) && (isAdmin() || (isVerifiedUser() && existing().homeroomTeacherEmail == request.auth.token.email));
       allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.homeroomTeacherEmail == request.auth.token.email);
-      allow create: if isVerifiedUser() && isValidId(recordId) && isValidDailyAttendance(incoming()) &&
+      allow create: if isValidId(recordId) && isValidDailyAttendance(incoming()) &&
         incoming().id == recordId &&
-        incoming().recordedByUid == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         exists(/databases/$(database)/documents/students/$(incoming().studentId)) &&
         exists(/databases/$(database)/documents/classes/$(incoming().classId)) &&
-        (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId));
-      allow update: if isVerifiedUser() && isValidId(recordId) && isValidDailyAttendance(incoming()) &&
+        (
+          (isVerifiedUser() &&
+            incoming().recordedByUid == request.auth.uid &&
+            (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId))) ||
+          (!isSignedIn() && hasValidWaliSecretForClass(incoming().classId, incoming().waliSecret))
+        );
+      allow update: if isValidId(recordId) && isValidDailyAttendance(incoming()) &&
         incoming().id == existing().id &&
         incoming().studentId == existing().studentId &&
         incoming().classId == existing().classId &&
         incoming().createdAt == existing().createdAt &&
-        incoming().recordedByUid == existing().recordedByUid &&
         incoming().updatedAt == request.time &&
         (
-          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
-            'status', 'note', 'attachmentUrl', 'attachmentName', 'attachmentUploadedAt',
-            'homeroomTeacherEmail', 'recordedBy', 'updatedAt'
-          ])) ||
-          (isBoundStaff() && boundClassId() == existing().classId &&
+          (isVerifiedUser() && isAdmin() &&
+            incoming().recordedByUid == existing().recordedByUid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'note', 'attachmentUrl', 'attachmentName', 'attachmentUploadedAt',
+              'homeroomTeacherEmail', 'recordedBy', 'updatedAt'
+            ])) ||
+          (isVerifiedUser() && isBoundStaff() && boundClassId() == existing().classId &&
+            incoming().recordedByUid == existing().recordedByUid &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'status', 'note', 'attachmentUrl', 'attachmentName', 'attachmentUploadedAt', 'updatedAt'
+            ])) ||
+          (!isSignedIn() &&
+            hasValidWaliSecretForClass(existing().classId, incoming().waliSecret) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'note', 'attachmentUrl', 'attachmentName', 'attachmentUploadedAt',
+              'recordedBy', 'waliSecret', 'updatedAt'
             ]))
         );
       allow delete: if isAdmin() && isValidId(recordId);
@@ -591,17 +706,22 @@ service cloud.firestore {
           resource.data.homeroomTeacherEmail == request.auth.token.email
         )
       );
-      allow create: if isVerifiedUser() && isValidId(sessionId) && isValidTeachingAttendance(incoming()) &&
+      allow create: if isValidId(sessionId) && isValidTeachingAttendance(incoming()) &&
         incoming().id == sessionId &&
         incoming().status == 'mengajar' &&
-        incoming().recordedByUid == request.auth.uid &&
-        incoming().recordedByEmail == request.auth.token.email &&
+        isValidId(incoming().recordedByUid) &&
+        (
+          (isVerifiedUser() &&
+            incoming().recordedByUid == request.auth.uid &&
+            incoming().recordedByEmail == request.auth.token.email) ||
+          (!isSignedIn() && incoming().recordedByEmail == '')
+        ) &&
         incoming().arrivalAt == request.time &&
         incoming().updatedAt == request.time &&
         exists(/databases/$(database)/documents/class_qr_codes/$(incoming().classId)) &&
         get(/databases/$(database)/documents/class_qr_codes/$(incoming().classId)).data.isActive == true &&
         get(/databases/$(database)/documents/class_qr_codes/$(incoming().classId)).data.qrToken == incoming().qrToken;
-      allow update: if isVerifiedUser() && isValidId(sessionId) && isValidTeachingAttendance(incoming()) &&
+      allow update: if isValidId(sessionId) && isValidTeachingAttendance(incoming()) &&
         incoming().id == existing().id &&
         incoming().classId == existing().classId &&
         incoming().qrToken == existing().qrToken &&
@@ -616,7 +736,11 @@ service cloud.firestore {
           ])) ||
           (existing().status == 'mengajar' &&
             incoming().status == 'selesai' &&
-            existing().recordedByUid == request.auth.uid &&
+            (
+              (isVerifiedUser() && existing().recordedByUid == request.auth.uid) ||
+              (!isSignedIn() && existing().recordedByEmail == '' &&
+                exists(/databases/$(database)/documents/class_qr_codes/$(existing().classId)))
+            ) &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'status', 'completedTime', 'completedTimestampMs', 'durationMinutes', 'closingNote', 'updatedAt'
             ])) ||
@@ -631,12 +755,16 @@ service cloud.firestore {
     match /correction_logs/{logId} {
       allow get: if isValidId(logId) && (isAdmin() || (isVerifiedUser() && existing().homeroomTeacherEmail == request.auth.token.email));
       allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.homeroomTeacherEmail == request.auth.token.email);
-      allow create: if isVerifiedUser() && isValidId(logId) && isValidCorrectionLog(incoming()) &&
+      allow create: if isValidId(logId) && isValidCorrectionLog(incoming()) &&
         incoming().id == logId &&
-        incoming().changedByUid == request.auth.uid &&
         incoming().createdAt == request.time &&
         exists(/databases/$(database)/documents/students/$(incoming().studentId)) &&
-        (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId));
+        (
+          (isVerifiedUser() &&
+            incoming().changedByUid == request.auth.uid &&
+            (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId))) ||
+          (!isSignedIn() && hasValidWaliSecretForClass(incoming().classId, incoming().waliSecret))
+        );
       allow update: if false;
       allow delete: if isAdmin() && isValidId(logId);
     }
@@ -644,28 +772,40 @@ service cloud.firestore {
     match /report_archives/{archiveId} {
       allow get: if isValidId(archiveId) && (isAdmin() || (isVerifiedUser() && existing().homeroomTeacherEmail == request.auth.token.email));
       allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.homeroomTeacherEmail == request.auth.token.email);
-      allow create: if isVerifiedUser() && isValidId(archiveId) && isValidReportArchive(incoming()) &&
+      allow create: if isValidId(archiveId) && isValidReportArchive(incoming()) &&
         incoming().id == archiveId &&
-        incoming().createdByUid == request.auth.uid &&
         incoming().updatedAt == request.time &&
         exists(/databases/$(database)/documents/students/$(incoming().studentId)) &&
-        (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId));
-      allow update: if isVerifiedUser() && isValidId(archiveId) && isValidReportArchive(incoming()) &&
+        (
+          (isVerifiedUser() &&
+            incoming().createdByUid == request.auth.uid &&
+            (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId))) ||
+          (!isSignedIn() && hasValidWaliSecretForClass(incoming().classId, incoming().waliSecret))
+        );
+      allow update: if isValidId(archiveId) && isValidReportArchive(incoming()) &&
         incoming().id == existing().id &&
         incoming().studentId == existing().studentId &&
         incoming().classId == existing().classId &&
-        incoming().createdByUid == existing().createdByUid &&
         incoming().updatedAt == request.time &&
         (
-          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
-            'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
-            'version', 'customNote', 'deliveryStatus', 'lastDeliveredAt',
-            'homeroomTeacherEmail', 'updatedAt'
-          ])) ||
-          (isBoundStaff() && boundClassId() == existing().classId &&
+          (isVerifiedUser() && isAdmin() &&
+            incoming().createdByUid == existing().createdByUid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
+              'version', 'customNote', 'deliveryStatus', 'lastDeliveredAt',
+              'homeroomTeacherEmail', 'updatedAt'
+            ])) ||
+          (isVerifiedUser() && isBoundStaff() && boundClassId() == existing().classId &&
+            incoming().createdByUid == existing().createdByUid &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
               'version', 'customNote', 'deliveryStatus', 'lastDeliveredAt', 'updatedAt'
+            ])) ||
+          (!isSignedIn() &&
+            hasValidWaliSecretForClass(existing().classId, incoming().waliSecret) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
+              'version', 'customNote', 'deliveryStatus', 'lastDeliveredAt', 'waliSecret', 'updatedAt'
             ]))
         );
       allow delete: if isAdmin() && isValidId(archiveId);
@@ -681,6 +821,79 @@ service cloud.firestore {
         (isAdmin() || isBoundStaff());
       allow update: if false;
       allow delete: if isAdmin() && isValidId(auditId);
+    }
+
+    // === WALI KELAS CREDENTIAL & SCOPED PORTAL COLLECTIONS ===
+
+    match /wali_access/{credHash} {
+      allow get: if isValidId(credHash);
+      allow list: if isBootstrappedAdmin();
+      allow create, update: if isAdmin() && isValidId(credHash) && isValidWaliAccess(incoming()) &&
+        incoming().credHash == credHash &&
+        incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(credHash);
+    }
+
+    match /wali_madrasah/{madrasahKey} {
+      allow get: if isValidId(madrasahKey);
+      allow list: if false;
+      allow create, update: if isAdmin() && isValidId(madrasahKey) && isValidWaliMadrasah(incoming()) &&
+        incoming().madrasahKey == madrasahKey &&
+        incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(madrasahKey);
+    }
+
+    match /wali_class_bundles/{classSecret} {
+      allow get: if isValidId(classSecret);
+      allow list: if false;
+      allow create, update: if isAdmin() && isValidId(classSecret) && isValidWaliClassBundle(incoming()) &&
+        incoming().classSecret == classSecret &&
+        incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(classSecret);
+    }
+
+    match /wali_attendance_months/{monthDocId} {
+      allow get: if isValidId(monthDocId);
+      allow list: if false;
+      allow create, update: if isValidId(monthDocId) && isValidWaliAttendanceMonth(incoming()) &&
+        incoming().updatedAt == request.time &&
+        monthDocId == (incoming().classSecret + '_' + incoming().yearMonth) &&
+        (isAdmin() || hasValidWaliSecretForClass(incoming().classId, incoming().classSecret));
+      allow delete: if isAdmin() && isValidId(monthDocId);
+    }
+
+    match /wali_attachments/{attDocId} {
+      allow get: if isValidId(attDocId);
+      allow list: if false;
+      allow create, update: if isValidId(attDocId) && isValidWaliAttachment(incoming()) &&
+        incoming().updatedAt == request.time &&
+        attDocId == (incoming().classSecret + '_' + incoming().attId) &&
+        (isAdmin() || hasValidWaliSecretForClass(incoming().classId, incoming().classSecret));
+      allow delete: if isAdmin() && isValidId(attDocId);
+    }
+
+    match /wali_teaching_months/{monthDocId} {
+      allow get: if isValidId(monthDocId);
+      allow list: if false;
+      allow create, update: if isValidId(monthDocId) && isValidWaliTeachingMonth(incoming()) &&
+        incoming().updatedAt == request.time &&
+        monthDocId == (incoming().classId + '_' + incoming().qrToken + '_' + incoming().yearMonth) &&
+        (
+          isAdmin() ||
+          (exists(/databases/$(database)/documents/class_qr_codes/$(incoming().classId)) &&
+            get(/databases/$(database)/documents/class_qr_codes/$(incoming().classId)).data.qrToken == incoming().qrToken)
+        );
+      allow delete: if isAdmin() && isValidId(monthDocId);
+    }
+
+    match /wali_archives/{classSecret} {
+      allow get: if isValidId(classSecret);
+      allow list: if false;
+      allow create, update: if isValidId(classSecret) && isValidWaliArchives(incoming()) &&
+        incoming().classSecret == classSecret &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || hasValidWaliSecretForClass(incoming().classId, classSecret));
+      allow delete: if isAdmin() && isValidId(classSecret);
     }
   }
 }

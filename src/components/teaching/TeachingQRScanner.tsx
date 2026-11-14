@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   Clock,
   KeyRound,
-  LogIn,
   QrCode,
   RefreshCw,
   ScanLine,
@@ -24,19 +23,68 @@ import {
 } from '../../services/firestoreService';
 import { parseClassQrPayload } from '../../services/qrPoster';
 import { ClassQrCodeRegistry, TeachingAttendanceRecord } from '../../types';
-import { AuthErrorInfo } from '../../firebase';
-import { AuthErrorBanner } from '../auth/AuthErrorBanner';
 
 interface TeachingQRScannerProps {
   authUser: FirebaseAuthUser | null;
-  authError: AuthErrorInfo | null;
-  onDismissAuthError: () => void;
-  onGoogleLogin: () => Promise<void>;
-  onGoogleRedirectLogin?: () => Promise<void>;
   onBackToPortal: () => void;
 }
 
 const SCANNER_ELEMENT_ID = 'ppm-qr-camera-region';
+const DEVICE_TEACHER_ID_KEY = 'ppm_guru_device_id';
+const TEACHER_PROFILE_KEY = 'ppm_guru_profile';
+const LOCAL_SESSIONS_KEY = 'ppm_guru_sessions';
+
+function getOrCreateDeviceTeacherId(): string {
+  try {
+    const existing = localStorage.getItem(DEVICE_TEACHER_ID_KEY);
+    if (existing && /^[a-zA-Z0-9_-]{6,100}$/.test(existing)) {
+      return existing;
+    }
+    const created = `dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    localStorage.setItem(DEVICE_TEACHER_ID_KEY, created);
+    return created;
+  } catch {
+    return `dev_${Date.now().toString(36)}`;
+  }
+}
+
+function loadLocalTeacherProfile(): { name: string; nip: string } {
+  try {
+    const raw = localStorage.getItem(TEACHER_PROFILE_KEY);
+    if (!raw) return { name: '', nip: '' };
+    const parsed = JSON.parse(raw) as { name?: string; nip?: string };
+    return { name: parsed.name || '', nip: parsed.nip || '' };
+  } catch {
+    return { name: '', nip: '' };
+  }
+}
+
+function saveLocalTeacherProfile(name: string, nip: string): void {
+  try {
+    localStorage.setItem(TEACHER_PROFILE_KEY, JSON.stringify({ name, nip }));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function loadLocalSessions(): TeachingAttendanceRecord[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_SESSIONS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as TeachingAttendanceRecord[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalSessions(records: TeachingAttendanceRecord[]): void {
+  try {
+    localStorage.setItem(LOCAL_SESSIONS_KEY, JSON.stringify(records.slice(0, 30)));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 const QUICK_SUBJECTS = [
   'Matematika',
@@ -55,10 +103,6 @@ const QUICK_SUBJECTS = [
 
 export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
   authUser,
-  authError,
-  onDismissAuthError,
-  onGoogleLogin,
-  onGoogleRedirectLogin,
   onBackToPortal,
 }) => {
   const html5QrRef = useRef<Html5Qrcode | null>(null);
@@ -68,7 +112,6 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [isVerifyingQr, setIsVerifyingQr] = useState(false);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Scanned Class & Active Session State
   const [verifiedClassQr, setVerifiedClassQr] = useState<ClassQrCodeRegistry | null>(null);
@@ -77,8 +120,9 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
   const [showNewSessionForm, setShowNewSessionForm] = useState(false);
 
   // Check-in / Check-out Form State
-  const [teacherName, setTeacherName] = useState(authUser?.displayName || '');
-  const [teacherNip, setTeacherNip] = useState('');
+  const initialProfile = loadLocalTeacherProfile();
+  const [teacherName, setTeacherName] = useState(initialProfile.name || authUser?.displayName || '');
+  const [teacherNip, setTeacherNip] = useState(initialProfile.nip || '');
   const [subject, setSubject] = useState('');
   const [lessonPeriod, setLessonPeriod] = useState('');
   const [arrivalNote, setArrivalNote] = useState('');
@@ -102,12 +146,22 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
   }, [authUser?.displayName, teacherName]);
 
   const loadRecentHistory = useCallback(async () => {
-    if (!authUser) return;
+    const local = loadLocalSessions();
+    if (!authUser) {
+      setRecentHistory(local);
+      return;
+    }
     try {
-      const list = await firestoreService.getMyRecentTeachingHistory(authUser.uid);
-      setRecentHistory(list);
+      const remote = await firestoreService.getMyRecentTeachingHistory(authUser.uid);
+      const map = new Map<string, TeachingAttendanceRecord>();
+      local.forEach((item) => map.set(item.id, item));
+      remote.forEach((item) => map.set(item.id, item));
+      const merged = Array.from(map.values())
+        .sort((a, b) => (b.arrivalTimestampMs || 0) - (a.arrivalTimestampMs || 0))
+        .slice(0, 20);
+      setRecentHistory(merged);
     } catch {
-      // ignore initial read error
+      setRecentHistory(local);
     }
   }, [authUser]);
 
@@ -147,11 +201,6 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
         return;
       }
 
-      if (!authUser) {
-        setScanError('Silakan login akun Google terlebih dahulu sebelum memindai QR kelas.');
-        return;
-      }
-
       setIsVerifyingQr(true);
       try {
         const registry = await firestoreService.verifyClassQrCode(
@@ -170,11 +219,30 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
         setReceipt(null);
 
         const today = formatDateYYYYMMDD();
-        const activeSessions = await firestoreService.getMyActiveTeachingSessionsForClass(
-          authUser.uid,
-          registry.classId,
-          today
+        const localActive = loadLocalSessions().filter(
+          (r) => r.classId === registry.classId && r.date === today && r.status === 'mengajar'
         );
+
+        let remoteActive: TeachingAttendanceRecord[] = [];
+        if (authUser) {
+          try {
+            remoteActive = await firestoreService.getMyActiveTeachingSessionsForClass(
+              authUser.uid,
+              registry.classId,
+              today
+            );
+          } catch {
+            remoteActive = [];
+          }
+        }
+
+        const mergedMap = new Map<string, TeachingAttendanceRecord>();
+        localActive.forEach((s) => mergedMap.set(s.id, s));
+        remoteActive.forEach((s) => mergedMap.set(s.id, s));
+        const activeSessions = Array.from(mergedMap.values()).sort(
+          (a, b) => (b.arrivalTimestampMs || 0) - (a.arrivalTimestampMs || 0)
+        );
+
         setActiveClassSessions(activeSessions);
         setShowNewSessionForm(activeSessions.length === 0);
       } catch (err) {
@@ -188,7 +256,6 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
   );
 
   const startCamera = useCallback(async () => {
-    if (!authUser) return;
     setCameraError(null);
     setScanError(null);
 
@@ -219,7 +286,7 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
       );
       setIsScanning(false);
     }
-  }, [authUser, handleDecodedPayload, stopCamera]);
+  }, [handleDecodedPayload, stopCamera]);
 
   const handleUploadQrImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -248,12 +315,14 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
 
   const handleCheckIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authUser || !verifiedClassQr) return;
+    if (!verifiedClassQr) return;
     if (!teacherName.trim() || !subject.trim()) return;
 
     setIsSubmitting(true);
     setScanError(null);
     try {
+      const actorUid = authUser?.uid || getOrCreateDeviceTeacherId();
+      const actorEmail = authUser?.email || '';
       const created = await firestoreService.checkInTeacher({
         qrRegistry: verifiedClassQr,
         teacherName: teacherName.trim(),
@@ -261,8 +330,13 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
         subject: subject.trim(),
         lessonPeriod: lessonPeriod.trim(),
         arrivalNote: arrivalNote.trim(),
-        authUser,
+        actorUid,
+        actorEmail,
       });
+      saveLocalTeacherProfile(teacherName.trim(), teacherNip.trim());
+      const prevLocal = loadLocalSessions().filter((s) => s.id !== created.id);
+      saveLocalSessions([created, ...prevLocal]);
+
       setReceipt({ mode: 'checkin', record: created });
       setVerifiedClassQr(null);
       setSubject('');
@@ -282,6 +356,12 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
     setScanError(null);
     try {
       const updated = await firestoreService.checkOutTeacher(session, closingNote);
+      const nextLocal = loadLocalSessions().map((s) => (s.id === updated.id ? updated : s));
+      if (!nextLocal.some((s) => s.id === updated.id)) {
+        nextLocal.unshift(updated);
+      }
+      saveLocalSessions(nextLocal);
+
       setReceipt({ mode: 'checkout', record: updated });
       setVerifiedClassQr(null);
       setActiveClassSessions([]);
@@ -321,9 +401,13 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
 
           <div className="flex items-center gap-2 text-xs">
             <span className="font-bold text-[#0B192C] hidden sm:inline">Kamera Scan Guru</span>
-            {authUser && (
+            {authUser ? (
               <span className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-medium truncate max-w-[180px]">
                 {authUser.email}
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold">
+                Scan Langsung · Tanpa Login
               </span>
             )}
           </div>
@@ -336,65 +420,24 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
           <div className="space-y-1">
             <div className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
               <ScanLine className="w-4 h-4" />
-              <span>Absensi Guru Mengajar di Kelas</span>
+              <span>Absensi Guru Mengajar di Kelas (Langsung Tanpa Login Google)</span>
             </div>
             <h1 className="text-lg sm:text-xl font-bold tracking-tight">
               Scan Barcode QR Kelas
             </h1>
             <p className="text-xs text-slate-300/90 leading-relaxed">
-              Pindai QR kelas saat <strong>Mulai Ngajar</strong> dan pindai kembali saat <strong>Selesai Ngajar</strong>. Rekap otomatis masuk ke Wali Kelas.
+              Pindai QR kelas saat <strong>Mulai Ngajar</strong> dan pindai kembali saat <strong>Selesai Ngajar</strong>. Rekap otomatis masuk ke Admin &amp; Wali Kelas.
             </p>
           </div>
         </div>
 
-        {/* Auth Gate if Guru hasn't signed in with Google yet */}
-        {!authUser ? (
-          <div className="space-y-4 max-w-lg mx-auto">
-            {authError && (
-              <AuthErrorBanner
-                error={authError}
-                onDismiss={onDismissAuthError}
-                onTryRedirectLogin={onGoogleRedirectLogin}
-              />
-            )}
-            <div className="surface-card p-8 text-center space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center mx-auto">
-                <Camera className="w-6 h-6" />
-              </div>
-              <div className="space-y-1.5">
-                <h2 className="text-base font-bold text-[#0B192C]">
-                  Verifikasi Akun Google untuk Kamera Scan
-                </h2>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Masuk 1 kali dengan akun Google Anda agar identitas guru dan waktu kehadiran mengajar tercatat resmi ke dashboard Wali Kelas.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={isLoggingIn}
-                onClick={async () => {
-                  setIsLoggingIn(true);
-                  try {
-                    await onGoogleLogin();
-                  } finally {
-                    setIsLoggingIn(false);
-                  }
-                }}
-                className="inline-flex items-center justify-center gap-2 btn-emerald px-5 py-3 rounded-xl text-xs font-semibold cursor-pointer disabled:opacity-60"
-              >
-                <LogIn className="w-4 h-4" />
-                <span>{isLoggingIn ? 'Menghubungkan Google...' : 'Masuk dengan Google & Buka Scan'}</span>
-              </button>
+        <>
+          {scanError && (
+            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <span>{scanError}</span>
             </div>
-          </div>
-        ) : (
-          <>
-            {scanError && (
-              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-start gap-2.5">
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <span>{scanError}</span>
-              </div>
-            )}
+          )}
 
             {/* Confirmation Receipt after Check-In / Check-Out */}
             {receipt && (
@@ -866,7 +909,6 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
               </div>
             )}
           </>
-        )}
       </main>
     </div>
   );

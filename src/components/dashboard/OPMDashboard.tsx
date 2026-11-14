@@ -6,13 +6,17 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
+  Copy,
   Download,
   Edit2,
+  Eye,
+  EyeOff,
   FileSpreadsheet,
   GraduationCap,
   KeyRound,
   Plus,
   QrCode,
+  RefreshCw,
   School,
   Search,
   Settings,
@@ -173,9 +177,12 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
   // User Modal
   const [userModalOpen, setUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [showModalPin, setShowModalPin] = useState(false);
+  const [revealedPinIds, setRevealedPinIds] = useState<Record<string, boolean>>({});
   const [userForm, setUserForm] = useState({
     name: '',
     username: '',
+    accessPin: '',
     email: '',
     role: 'wali_kelas' as Role,
     nip: '',
@@ -431,12 +438,16 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
     setEventModalOpen(false);
   };
 
+  const generateRandomPin = () => String(Math.floor(100000 + Math.random() * 900000));
+
   // === USER HANDLERS ===
   const openAddUser = () => {
     setEditingUser(null);
+    setShowModalPin(true);
     setUserForm({
       name: '',
       username: '',
+      accessPin: generateRandomPin(),
       email: '',
       role: 'wali_kelas',
       nip: '',
@@ -448,9 +459,11 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
 
   const openEditUser = (u: User) => {
     setEditingUser(u);
+    setShowModalPin(false);
     setUserForm({
       name: u.name,
       username: u.username,
+      accessPin: u.accessPin || (u.role === 'wali_kelas' ? generateRandomPin() : ''),
       email: u.email || '',
       role: u.role,
       nip: u.nip || '',
@@ -460,14 +473,50 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
     setUserModalOpen(true);
   };
 
+  const handleCopyWaliLogin = async (u: User, className?: string) => {
+    const appUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const text = [
+      `Akses Login Wali Kelas — ${madrasah.name.trim() || 'Presensi Pintar Madrasah'}`,
+      className ? `Kelas: ${className}` : '',
+      `Nama: ${u.name}`,
+      `Username: ${u.username}`,
+      `PIN / Password: ${u.accessPin || '(Belum diatur Admin)'}`,
+      appUrl ? `Link Portal: ${appUrl}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      showNotice(`Info login "${u.name}" disalin ke clipboard.`);
+    } catch {
+      showNotice(`Username: ${u.username} · PIN: ${u.accessPin || '-'}`);
+    }
+  };
+
   const handleSaveUser = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userForm.name.trim() || !userForm.username.trim()) return;
+    if (!userForm.name.trim()) return;
+    const rawUsername =
+      userForm.username.trim() ||
+      userForm.name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 30) ||
+      `user_${Date.now().toString(36)}`;
+    const cleanUsername = rawUsername.toLowerCase().replace(/[^a-z0-9._-]/g, '_');
+    const cleanPin =
+      userForm.role === 'wali_kelas'
+        ? userForm.accessPin.trim() || generateRandomPin()
+        : '';
     const cleanEmail = userForm.email.trim();
     if (editingUser) {
       onUpdateUser({
         ...editingUser,
         ...userForm,
+        username: cleanUsername,
+        accessPin: cleanPin,
         email: cleanEmail,
         assignedClassId: userForm.role === 'wali_kelas' ? userForm.assignedClassId : undefined,
       });
@@ -475,6 +524,8 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
     } else {
       onAddUser({
         ...userForm,
+        username: cleanUsername,
+        accessPin: cleanPin,
         email: cleanEmail,
         assignedClassId: userForm.role === 'wali_kelas' ? userForm.assignedClassId : undefined,
       });
@@ -1864,10 +1915,10 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
             <div>
               <h2 className="text-base sm:text-lg font-bold text-[#0B192C]">
-                Manajemen Akun Pengguna (OPM &amp; Wali Kelas)
+                Manajemen Akun Pengguna (Admin &amp; Wali Kelas)
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Buat, edit, aktifkan/nonaktifkan akun Administrator dan Wali Kelas.
+                Buat akun &amp; PIN akses agar setiap Wali Kelas dapat login mandiri dari perangkat masing-masing untuk mengelola kelasnya.
               </p>
             </div>
             <button
@@ -1885,19 +1936,30 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
             {users.map((u) => {
               const uClass = classes.find((c) => c.id === u.assignedClassId);
               const isSelf = u.id === currentUser.id;
+              const isRevealed = Boolean(revealedPinIds[u.id]);
               return (
                 <div
                   key={u.id}
                   className="rounded-xl border border-slate-200 p-4 space-y-2.5 bg-white"
                 >
                   <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
+                    <div className="min-w-0">
                       <div className="font-bold text-sm text-slate-900 truncate">{u.name}</div>
                       <div className="text-[11px] text-slate-500 font-mono tabular-nums mt-0.5 truncate">
-                        @{u.username} {u.email ? `· ${u.email}` : ''} {u.nip ? `· NIP ${u.nip}` : ''}
+                        @{u.username} {u.nip ? `· NIP ${u.nip}` : ''}
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      {u.role === 'wali_kelas' && (
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyWaliLogin(u, uClass?.name)}
+                          className="p-2 text-slate-500 hover:text-[#0B192C] rounded-lg hover:bg-slate-100 cursor-pointer"
+                          title="Salin Info Login"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => openEditUser(u)}
@@ -1921,6 +1983,31 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                       )}
                     </div>
                   </div>
+                  {u.role === 'wali_kelas' && (
+                    <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200/80 text-[11px]">
+                      <div className="font-mono text-slate-700 truncate">
+                        PIN:{' '}
+                        {u.accessPin ? (
+                          <strong className="text-[#0B192C]">
+                            {isRevealed ? u.accessPin : '••••••'}
+                          </strong>
+                        ) : (
+                          <span className="text-amber-700 font-sans">Belum diatur</span>
+                        )}
+                      </div>
+                      {u.accessPin && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRevealedPinIds((prev) => ({ ...prev, [u.id]: !isRevealed }))
+                          }
+                          className="text-slate-500 hover:text-[#0B192C] cursor-pointer"
+                        >
+                          {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
                     <span className="text-slate-600">
                       {u.role === 'opm' ? 'Administrator / OPM' : `Wali Kelas (${uClass?.name || '-'})`}
@@ -1946,8 +2033,8 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
                 <tr>
-                  <th className="py-2.5 px-4">Nama Lengkap</th>
-                  <th className="py-2.5 px-4">Email Google (Login)</th>
+                  <th className="py-2.5 px-4">Nama &amp; Username</th>
+                  <th className="py-2.5 px-4">Akses Masuk (PIN / Google)</th>
                   <th className="py-2.5 px-4">Role</th>
                   <th className="py-2.5 px-4">Kelas Ditugaskan</th>
                   <th className="py-2.5 px-4">Status</th>
@@ -1958,20 +2045,56 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                 {users.map((u) => {
                   const uClass = classes.find((c) => c.id === u.assignedClassId);
                   const isSelf = u.id === currentUser.id;
+                  const isRevealed = Boolean(revealedPinIds[u.id]);
                   return (
                     <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-2.5 px-4">
                         <div className="font-semibold text-slate-900">{u.name}</div>
-                        <div className="text-[11px] text-slate-400 font-mono tabular-nums">
+                        <div className="text-[11px] text-slate-500 font-mono tabular-nums">
                           @{u.username}
                           {u.nip ? ` · NIP ${u.nip}` : ''}
                         </div>
                       </td>
-                      <td className="py-2.5 px-4 font-mono text-slate-700">
-                        {u.email ? (
-                          <span>{u.email}</span>
+                      <td className="py-2.5 px-4">
+                        {u.role === 'opm' ? (
+                          <span className="font-mono text-slate-700">{u.email || 'Google Admin'}</span>
+                        ) : u.accessPin ? (
+                          <div className="inline-flex items-center gap-2">
+                            <span className="font-mono text-[11px] px-2 py-1 rounded-md bg-slate-100 border border-slate-200 text-[#0B192C] font-semibold tabular-nums">
+                              {isRevealed ? u.accessPin : '••••••'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRevealedPinIds((prev) => ({ ...prev, [u.id]: !isRevealed }))
+                              }
+                              className="p-1 text-slate-400 hover:text-[#0B192C] cursor-pointer"
+                              title={isRevealed ? 'Sembunyikan PIN' : 'Lihat PIN'}
+                            >
+                              {isRevealed ? (
+                                <EyeOff className="w-3.5 h-3.5" />
+                              ) : (
+                                <Eye className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleCopyWaliLogin(u, uClass?.name)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-semibold text-[#0B192C] cursor-pointer"
+                              title="Salin username & PIN untuk dibagikan ke Wali Kelas"
+                            >
+                              <Copy className="w-3 h-3 text-emerald-700" />
+                              <span>Salin</span>
+                            </button>
+                          </div>
                         ) : (
-                          <span className="text-amber-600 italic font-sans">Belum diisi</span>
+                          <button
+                            type="button"
+                            onClick={() => openEditUser(u)}
+                            className="text-[11px] text-amber-700 font-semibold hover:underline cursor-pointer"
+                          >
+                            Belum ada PIN · Atur Sekarang
+                          </button>
                         )}
                       </td>
                       <td className="py-2.5 px-4">
@@ -2623,33 +2746,17 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Username *</label>
-                    <input
-                      type="text"
-                      required
-                      value={userForm.username}
-                      onChange={(e) => setUserForm({ ...userForm, username: e.target.value })}
-                      className="app-input font-mono"
-                    />
-                  </div>
-                  <div>
                     <label className="block font-semibold text-slate-700 mb-1">
-                      Email Google (untuk Login) *
+                      Username Login {userForm.role === 'wali_kelas' ? '*' : ''}
                     </label>
                     <input
-                      type="email"
-                      required={userForm.role === 'wali_kelas'}
-                      value={userForm.email}
-                      onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-                      placeholder="guru@gmail.com"
+                      type="text"
+                      value={userForm.username}
+                      onChange={(e) => setUserForm({ ...userForm, username: e.target.value })}
+                      placeholder="contoh: wali_7a"
                       className="app-input font-mono"
                     />
                   </div>
-                </div>
-                <p className="text-[11px] text-slate-500 -mt-1">
-                  Pengguna login menggunakan akun Google sesuai alamat email di atas agar data presensi &amp; rekap kelas tersinkronisasi aman di cloud.
-                </p>
-                <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">Role</label>
                     <select
@@ -2661,6 +2768,54 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                       <option value="opm">Administrator / OPM</option>
                     </select>
                   </div>
+                </div>
+
+                {userForm.role === 'wali_kelas' && (
+                  <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-200/80 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <label className="font-semibold text-[#0B192C] flex items-center gap-1.5">
+                        <KeyRound className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>PIN / Password Masuk Wali Kelas *</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowModalPin(true);
+                          setUserForm({ ...userForm, accessPin: generateRandomPin() });
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:underline cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Acak PIN</span>
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showModalPin ? 'text' : 'password'}
+                        required
+                        minLength={4}
+                        maxLength={32}
+                        value={userForm.accessPin}
+                        onChange={(e) => setUserForm({ ...userForm, accessPin: e.target.value })}
+                        placeholder="Minimal 4 karakter / 6 digit angka"
+                        className="app-input font-mono pr-10 bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowModalPin((s) => !s)}
+                        className="absolute right-2.5 top-2 text-slate-400 hover:text-[#0B192C] cursor-pointer"
+                      >
+                        {showModalPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      Wali Kelas login langsung di portal menggunakan <strong>Username</strong> dan{' '}
+                      <strong>PIN/Password</strong> ini tanpa perlu akun Google.
+                    </p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">NIP</label>
                     <input
@@ -2670,10 +2825,23 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                       className="app-input font-mono tabular-nums"
                     />
                   </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Email Google (Opsional)
+                    </label>
+                    <input
+                      type="email"
+                      value={userForm.email}
+                      onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                      placeholder="Opsional"
+                      className="app-input font-mono"
+                    />
+                  </div>
                 </div>
+
                 {userForm.role === 'wali_kelas' && (
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Penugasan Kelas</label>
+                    <label className="block font-semibold text-slate-700 mb-1">Penugasan Kelas *</label>
                     <select
                       value={userForm.assignedClassId}
                       onChange={(e) =>

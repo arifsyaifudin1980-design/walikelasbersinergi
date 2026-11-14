@@ -159,6 +159,20 @@ export function calculateClassRecapFromData(
 /**
  * Bridge service for components calling archive/delivery/audit updates directly.
  */
+function getStoredWaliSession(): { userId: string; classSecret: string } | null {
+  try {
+    const raw = localStorage.getItem('ppm_wali_session');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { userId?: string; classSecret?: string };
+    if (parsed.userId) {
+      return { userId: parsed.userId, classSecret: parsed.classSecret || '' };
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+}
+
 export const storageService = {
   calculateClassRecap(
     classId: string,
@@ -186,8 +200,19 @@ export const storageService = {
     classes: SchoolClass[] = []
   ): Promise<void> {
     const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    await firestoreService.saveArchiveItem(item, existingArchives, classes, uid);
+    if (uid) {
+      await firestoreService.saveArchiveItem(item, existingArchives, classes, uid);
+      return;
+    }
+    const wali = getStoredWaliSession();
+    if (!wali) return;
+    await firestoreService.saveArchiveItem(
+      item,
+      existingArchives,
+      classes,
+      wali.userId,
+      wali.classSecret
+    );
   },
 
   async updateDeliveryStatus(
@@ -196,8 +221,19 @@ export const storageService = {
     year: number,
     status: 'terkirim' | 'gagal'
   ): Promise<void> {
-    if (!auth.currentUser?.uid) return;
-    await firestoreService.updateDeliveryStatus(studentId, month, year, status);
+    if (auth.currentUser?.uid) {
+      await firestoreService.updateDeliveryStatus(studentId, month, year, status);
+      return;
+    }
+    const wali = getStoredWaliSession();
+    if (!wali?.classSecret) return;
+    await firestoreService.updateDeliveryStatus(
+      studentId,
+      month,
+      year,
+      status,
+      wali.classSecret
+    );
   },
 
   async addAuditLog(action: string, details: string, actor?: User): Promise<void> {

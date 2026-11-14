@@ -11,6 +11,8 @@ export interface User {
   id: string;
   username: string;
   password?: string;
+  accessPin?: string;
+  waliCredHash?: string;
   name: string;
   role: Role;
   nip?: string;
@@ -18,6 +20,20 @@ export interface User {
   authUid?: string;
   assignedClassId?: string; // For Wali Kelas
   isActive: boolean;
+}
+
+export interface WaliSession {
+  credHash: string;
+  userId: string;
+  username: string;
+  name: string;
+  nip?: string;
+  assignedClassId: string;
+  classSecret: string;
+  madrasahKey: string;
+  qrToken: string;
+  className?: string;
+  loggedInAt?: string;
 }
 
 export interface MadrasahProfile {
@@ -33,6 +49,7 @@ export interface MadrasahProfile {
   city: string;
   logoUrl: string; // Empty string '' when no logo uploaded (empty logo container)
   signatureNoteDefault: string;
+  madrasahKey?: string;
 }
 
 export interface AcademicYear {
@@ -63,6 +80,7 @@ export interface SchoolClass {
   homeroomTeacherUid?: string;
   qrToken?: string;
   qrGeneratedAt?: string;
+  waliSecret?: string;
   isActive: boolean;
 }
 

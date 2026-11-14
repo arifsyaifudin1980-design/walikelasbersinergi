@@ -156,7 +156,7 @@ export const Topbar: React.FC<TopbarProps> = ({
               {canSwitchRoles && activeUsers.length > 1 && (
                 <>
                   <div className="px-4 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Pratinjau Sesi Akun (Admin)
+                    Mode Peran Fleksibel (Admin / Wali)
                   </div>
                   <div className="max-h-56 overflow-y-auto divide-y divide-slate-50 scrollbar-thin">
                     {activeUsers.map((u) => {
@@ -215,7 +215,7 @@ export const Topbar: React.FC<TopbarProps> = ({
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Keluar Akun Google</span>
+                  <span>{authEmail ? 'Keluar Akun Google' : 'Keluar Sesi'}</span>
                 </button>
               </div>
             </div>

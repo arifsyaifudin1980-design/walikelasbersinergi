@@ -1,14 +1,11 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Camera,
   CheckCheck,
   Download,
-  Eye,
   FileSpreadsheet,
-  History,
   Image as ImageIcon,
-  Paperclip,
   School,
   Search,
   Trash2,
@@ -49,6 +46,8 @@ interface AttendanceMatrixProps {
   ) => void;
   onBulkSetHadir: (classId: string, date: string) => void;
   onNavigateToMaster?: (tab: string) => void;
+  onActiveMonthYearChange?: (month: number, year: number) => void;
+  onFetchAttachment?: (recordId: string) => Promise<string | null>;
 }
 
 export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
@@ -62,6 +61,8 @@ export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
   onUpdateAttendance,
   onBulkSetHadir,
   onNavigateToMaster,
+  onActiveMonthYearChange,
+  onFetchAttachment,
 }) => {
   const now = new Date();
   const defaultMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -74,6 +75,8 @@ export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
   const [selectedMonthValue, setSelectedMonthValue] = useState<string>(defaultMonthStr);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [uploadFeedback, setUploadFeedback] = useState<string | null>(null);
+  const [attachmentCache, setAttachmentCache] = useState<Record<string, string>>({});
+  const [loadingAttachmentId, setLoadingAttachmentId] = useState<string | null>(null);
 
   // Lightbox / Photo Preview & Upload Modal for a specific student + date
   const [photoModalTarget, setPhotoModalTarget] = useState<{
@@ -160,6 +163,79 @@ export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
     [selectedDate, calendarEvents]
   );
 
+  useEffect(() => {
+    if (!onActiveMonthYearChange) return;
+    if (viewMode === 'daily' && selectedDate.length >= 7) {
+      const [y, m] = selectedDate.slice(0, 7).split('-').map(Number);
+      if (y && m) onActiveMonthYearChange(m, y);
+    } else if (viewMode === 'matrix' && selectedMonthValue.length >= 7) {
+      const [y, m] = selectedMonthValue.split('-').map(Number);
+      if (y && m) onActiveMonthYearChange(m, y);
+    }
+  }, [viewMode, selectedDate, selectedMonthValue, onActiveMonthYearChange]);
+
+  const resolveAttachmentUrl = async (rec?: DailyAttendanceRecord): Promise<string | undefined> => {
+    if (!rec) return undefined;
+    if (rec.attachmentUrl) return rec.attachmentUrl;
+    if (attachmentCache[rec.id]) return attachmentCache[rec.id];
+    if (!rec.attachmentName || !onFetchAttachment) return undefined;
+    setLoadingAttachmentId(rec.id);
+    try {
+      const fetched = await onFetchAttachment(rec.id);
+      if (fetched) {
+        setAttachmentCache((prev) => ({ ...prev, [rec.id]: fetched }));
+        return fetched;
+      }
+    } finally {
+      setLoadingAttachmentId(null);
+    }
+    return undefined;
+  };
+
+  const openPhotoLightbox = (student: Student, dateStr: string, record?: DailyAttendanceRecord) => {
+    const cachedUrl = record ? record.attachmentUrl || attachmentCache[record.id] : undefined;
+    setPhotoModalTarget({
+      student,
+      date: dateStr,
+      record: record ? { ...record, attachmentUrl: cachedUrl || '' } : undefined,
+    });
+    if (record && !cachedUrl && record.attachmentName && onFetchAttachment) {
+      void resolveAttachmentUrl(record).then((fetched) => {
+        if (!fetched) return;
+        setPhotoModalTarget((prev) =>
+          prev && prev.record?.id === record.id
+            ? { ...prev, record: { ...prev.record, attachmentUrl: fetched } }
+            : prev
+        );
+      });
+    }
+  };
+
+  const openCellEditor = (student: Student, dateStr: string, rec?: DailyAttendanceRecord) => {
+    const status = rec?.status;
+    const cachedUrl = rec ? rec.attachmentUrl || attachmentCache[rec.id] : undefined;
+    setCellEditTarget({
+      student,
+      date: dateStr,
+      currentRecord: rec,
+      nextStatus: status || 'H',
+      reason: status ? `Koreksi presensi tanggal ${dateStr}` : 'Input presensi harian',
+      note: rec?.note || '',
+      attachmentUrl: cachedUrl,
+      attachmentName: rec?.attachmentName,
+    });
+    if (rec && !cachedUrl && rec.attachmentName && onFetchAttachment) {
+      void resolveAttachmentUrl(rec).then((fetched) => {
+        if (!fetched) return;
+        setCellEditTarget((prev) =>
+          prev && prev.currentRecord?.id === rec.id && !prev.removeAttachment
+            ? { ...prev, attachmentUrl: fetched }
+            : prev
+        );
+      });
+    }
+  };
+
   const showNotice = (msg: string) => {
     setUploadFeedback(msg);
     setTimeout(() => setUploadFeedback(null), 4000);
@@ -180,6 +256,9 @@ export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
       const { dataUrl, fileName } = await readAndCompressImage(file, 1024, 1024, 0.8);
       const existing = attendanceMap.get(`${student.id}_${dateStr}`);
       const statusToSave: AttendanceStatus = existing?.status || 'S'; // Default to Sakit/Izin if uploading evidence without status
+      const attId = existing?.id || `att_${student.id}_${dateStr}`;
+
+      setAttachmentCache((prev) => ({ ...prev, [attId]: dataUrl }));
 
       onUpdateAttendance(student.id, activeClass.id, dateStr, statusToSave, {
         attachmentUrl: dataUrl,
@@ -194,7 +273,7 @@ export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
           date: dateStr,
           record: {
             ...(existing || {
-              id: `att_${student.id}_${dateStr}`,
+              id: attId,
               studentId: student.id,
               classId: activeClass.id,
               date: dateStr,
@@ -552,7 +631,7 @@ export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
               else if (rec?.status === 'S') s++;
               else if (rec?.status === 'I') i++;
               else if (rec?.status === 'A') a++;
-              if (rec?.attachmentUrl) photos++;
+              if (rec?.attachmentUrl || rec?.attachmentName) photos++;
             });
             const recorded = h + s + i + a;
             const total = Math.max(classStudents.length, 1);
@@ -683,24 +762,24 @@ export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
                   />
 
                   <div className="flex items-center justify-between pt-1">
-                    {record?.attachmentUrl ? (
+                    {record && (record.attachmentUrl || attachmentCache[record.id] || record.attachmentName) ? (
                       <div className="flex items-center justify-between w-full gap-2">
                         <button
                           type="button"
-                          onClick={() =>
-                            setPhotoModalTarget({
-                              student,
-                              date: selectedDate,
-                              record,
-                            })
-                          }
+                          onClick={() => openPhotoLightbox(student, selectedDate, record)}
                           className="flex items-center gap-2.5 text-left min-w-0 cursor-pointer"
                         >
-                          <img
-                            src={record.attachmentUrl}
-                            alt={`Bukti ${student.name}`}
-                            className="w-10 h-10 rounded-lg border border-slate-200 object-cover shrink-0"
-                          />
+                          {record.attachmentUrl || attachmentCache[record.id] ? (
+                            <img
+                              src={record.attachmentUrl || attachmentCache[record.id]}
+                              alt={`Bukti ${student.name}`}
+                              className="w-10 h-10 rounded-lg border border-slate-200 object-cover shrink-0"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
+                              <ImageIcon className="w-4 h-4" />
+                            </div>
+                          )}
                           <div className="min-w-0">
                             <div className="text-xs font-semibold text-emerald-700 truncate">
                               {record.attachmentName || 'Lihat Foto Bukti'}
@@ -838,36 +917,31 @@ export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
                         </td>
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-2">
-                            {record?.attachmentUrl ? (
+                            {record &&
+                            (record.attachmentUrl ||
+                              attachmentCache[record.id] ||
+                              record.attachmentName) ? (
                               <>
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    setPhotoModalTarget({
-                                      student,
-                                      date: selectedDate,
-                                      record,
-                                    })
-                                  }
-                                  className="w-10 h-10 rounded-lg border border-slate-200 overflow-hidden shrink-0 hover:ring-2 hover:ring-emerald-600 transition cursor-pointer"
+                                  onClick={() => openPhotoLightbox(student, selectedDate, record)}
+                                  className="w-10 h-10 rounded-lg border border-slate-200 overflow-hidden shrink-0 hover:ring-2 hover:ring-emerald-600 transition cursor-pointer flex items-center justify-center bg-emerald-50 text-emerald-700"
                                   title="Klik untuk melihat foto bukti"
                                 >
-                                  <img
-                                    src={record.attachmentUrl}
-                                    alt={`Bukti ${student.name}`}
-                                    className="w-full h-full object-cover"
-                                  />
+                                  {record.attachmentUrl || attachmentCache[record.id] ? (
+                                    <img
+                                      src={record.attachmentUrl || attachmentCache[record.id]}
+                                      alt={`Bukti ${student.name}`}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <ImageIcon className="w-4 h-4" />
+                                  )}
                                 </button>
                                 <div className="min-w-0 flex-1">
                                   <button
                                     type="button"
-                                    onClick={() =>
-                                      setPhotoModalTarget({
-                                        student,
-                                        date: selectedDate,
-                                        record,
-                                      })
-                                    }
+                                    onClick={() => openPhotoLightbox(student, selectedDate, record)}
                                     className="text-xs font-semibold text-emerald-700 hover:underline truncate block max-w-[120px] cursor-pointer"
                                   >
                                     {record.attachmentName || 'Lihat Foto'}
@@ -1084,20 +1158,7 @@ export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
                           return (
                             <td
                               key={item.day}
-                              onClick={() =>
-                                setCellEditTarget({
-                                  student,
-                                  date: item.dateStr,
-                                  currentRecord: rec,
-                                  nextStatus: status || 'H',
-                                  reason: status
-                                    ? `Koreksi presensi tanggal ${item.dateStr}`
-                                    : 'Input presensi harian',
-                                  note: rec?.note || '',
-                                  attachmentUrl: rec?.attachmentUrl,
-                                  attachmentName: rec?.attachmentName,
-                                })
-                              }
+                              onClick={() => openCellEditor(student, item.dateStr, rec)}
                               title={`${student.name} (${item.dateStr}) - Klik untuk edit / upload foto`}
                               className="p-0.5 text-center border-r border-slate-100 cursor-pointer relative"
                             >
@@ -1106,7 +1167,7 @@ export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
                               >
                                 {status || ''}
                               </div>
-                              {rec?.attachmentUrl && (
+                              {(rec?.attachmentUrl || rec?.attachmentName) && (
                                 <span
                                   className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-xs bg-slate-900 ring-1 ring-white"
                                   title="Memiliki foto bukti"
@@ -1161,7 +1222,12 @@ export const AttendanceMatrix: React.FC<AttendanceMatrixProps> = ({
             </div>
 
             <div className="p-5 bg-slate-50 flex items-center justify-center max-h-[60vh] overflow-hidden">
-              {photoModalTarget.record?.attachmentUrl ? (
+              {photoModalTarget.record?.id && loadingAttachmentId === photoModalTarget.record.id ? (
+                <div className="text-xs text-slate-500 py-12 flex items-center gap-2">
+                  <span className="w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+                  <span>Memuat foto bukti dari cloud...</span>
+                </div>
+              ) : photoModalTarget.record?.attachmentUrl ? (
                 <img
                   src={photoModalTarget.record.attachmentUrl}
                   alt="Foto Bukti Presensi"
