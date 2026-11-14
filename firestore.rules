@@ -1,0 +1,686 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // === GLOBAL PRIMITIVES ===
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true && request.auth.token.email is string;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'arifsyaifudin1980@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() ||
+        (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isBoundStaff() {
+      return isVerifiedUser() &&
+        exists(/databases/$(database)/documents/staff_bindings/$(request.auth.uid));
+    }
+
+    function boundClassId() {
+      return get(/databases/$(database)/documents/staff_bindings/$(request.auth.uid)).data.assignedClassId;
+    }
+
+    function isValidStr(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    // === VALIDATION BLUEPRINTS ===
+    function isValidAdminAllowlist(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'grantedByUid', 'createdAt']) &&
+        isValidId(data.uid) &&
+        isValidStr(data.email, 3, 200) &&
+        (!('grantedByUid' in data) || isValidStr(data.grantedByUid, 1, 128)) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidStaffBinding(data) {
+      return data.keys().hasAll(['uid', 'userId', 'email', 'role', 'assignedClassId', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'userId', 'email', 'role', 'assignedClassId', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        isValidId(data.userId) &&
+        isValidStr(data.email, 3, 200) &&
+        data.role in ['opm', 'wali_kelas'] &&
+        isValidStr(data.assignedClassId, 0, 128) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMadrasahConfig(data) {
+      return data.keys().hasAll(['name', 'logoUrl', 'updatedAt', 'updatedByUid']) &&
+        data.keys().hasOnly([
+          'name', 'nsm', 'npsn', 'address', 'phone', 'email', 'website',
+          'headmasterName', 'headmasterNip', 'city', 'logoUrl', 'signatureNoteDefault',
+          'updatedAt', 'updatedByUid'
+        ]) &&
+        isValidStr(data.name, 0, 200) &&
+        (!('nsm' in data) || isValidStr(data.nsm, 0, 40)) &&
+        (!('npsn' in data) || isValidStr(data.npsn, 0, 40)) &&
+        (!('address' in data) || isValidStr(data.address, 0, 400)) &&
+        (!('phone' in data) || isValidStr(data.phone, 0, 40)) &&
+        (!('email' in data) || isValidStr(data.email, 0, 160)) &&
+        (!('website' in data) || isValidStr(data.website, 0, 200)) &&
+        (!('headmasterName' in data) || isValidStr(data.headmasterName, 0, 160)) &&
+        (!('headmasterNip' in data) || isValidStr(data.headmasterNip, 0, 60)) &&
+        (!('city' in data) || isValidStr(data.city, 0, 120)) &&
+        isValidStr(data.logoUrl, 0, 750000) &&
+        (!('signatureNoteDefault' in data) || isValidStr(data.signatureNoteDefault, 0, 500)) &&
+        isValidStr(data.updatedByUid, 1, 128) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAcademicSnapshot(data) {
+      return data.keys().hasAll(['yearsMap', 'eventsMap', 'updatedAt', 'updatedByUid']) &&
+        data.keys().hasOnly(['yearsMap', 'eventsMap', 'updatedAt', 'updatedByUid']) &&
+        data.yearsMap is map &&
+        data.eventsMap is map &&
+        isValidStr(data.updatedByUid, 1, 128) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserAccount(data) {
+      return data.keys().hasAll(['id', 'username', 'name', 'role', 'email', 'isActive', 'createdByUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'username', 'name', 'role', 'nip', 'email', 'authUid', 'assignedClassId', 'isActive', 'createdByUid', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidStr(data.username, 1, 80) &&
+        isValidStr(data.name, 1, 160) &&
+        data.role in ['opm', 'wali_kelas'] &&
+        (!('nip' in data) || isValidStr(data.nip, 0, 60)) &&
+        isValidStr(data.email, 0, 200) &&
+        (!('authUid' in data) || isValidStr(data.authUid, 0, 128)) &&
+        (!('assignedClassId' in data) || isValidStr(data.assignedClassId, 0, 128)) &&
+        data.isActive is bool &&
+        isValidStr(data.createdByUid, 1, 128) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAcademicYear(data) {
+      return data.keys().hasAll(['id', 'year', 'semester', 'isActive', 'startDate', 'endDate', 'createdByUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'year', 'semester', 'isActive', 'startDate', 'endDate', 'createdByUid', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidStr(data.year, 4, 30) &&
+        data.semester in ['Ganjil', 'Genap'] &&
+        data.isActive is bool &&
+        isValidStr(data.startDate, 8, 20) &&
+        isValidStr(data.endDate, 8, 20) &&
+        isValidStr(data.createdByUid, 1, 128) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCalendarEvent(data) {
+      return data.keys().hasAll(['id', 'date', 'title', 'type', 'isEffective', 'createdByUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'date', 'title', 'type', 'isEffective', 'createdByUid', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidStr(data.date, 10, 10) &&
+        isValidStr(data.title, 1, 200) &&
+        data.type in ['libur_nasional', 'libur_madrasah', 'libur_semester', 'kegiatan_khusus', 'non_efektif'] &&
+        data.isEffective is bool &&
+        isValidStr(data.createdByUid, 1, 128) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSchoolClass(data) {
+      return data.keys().hasAll([
+          'id', 'name', 'grade', 'academicYearId', 'homeroomTeacherId',
+          'homeroomTeacherName', 'homeroomTeacherEmail', 'homeroomTeacherUid',
+          'qrToken', 'isActive', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'name', 'grade', 'academicYearId', 'homeroomTeacherId',
+          'homeroomTeacherName', 'homeroomTeacherEmail', 'homeroomTeacherUid',
+          'qrToken', 'qrGeneratedAt', 'isActive', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidStr(data.name, 1, 80) &&
+        isValidStr(data.grade, 1, 20) &&
+        isValidStr(data.academicYearId, 0, 128) &&
+        isValidStr(data.homeroomTeacherId, 0, 128) &&
+        isValidStr(data.homeroomTeacherName, 0, 160) &&
+        isValidStr(data.homeroomTeacherEmail, 0, 200) &&
+        isValidStr(data.homeroomTeacherUid, 0, 128) &&
+        isValidId(data.qrToken) &&
+        data.qrToken.size() >= 6 &&
+        (!('qrGeneratedAt' in data) || isValidStr(data.qrGeneratedAt, 0, 40)) &&
+        data.isActive is bool &&
+        isValidStr(data.createdByUid, 1, 128) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidClassQrCode(data) {
+      return data.keys().hasAll([
+          'classId', 'className', 'grade', 'homeroomTeacherName',
+          'homeroomTeacherUid', 'qrToken', 'isActive', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'classId', 'className', 'grade', 'homeroomTeacherName',
+          'homeroomTeacherUid', 'qrToken', 'isActive', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.classId) &&
+        isValidStr(data.className, 1, 80) &&
+        isValidStr(data.grade, 1, 20) &&
+        isValidStr(data.homeroomTeacherName, 0, 160) &&
+        isValidStr(data.homeroomTeacherUid, 0, 128) &&
+        isValidId(data.qrToken) &&
+        data.qrToken.size() >= 6 &&
+        data.isActive is bool &&
+        isValidStr(data.createdByUid, 1, 128) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidStudent(data) {
+      return data.keys().hasAll([
+          'id', 'nis', 'nisn', 'name', 'gender', 'classId',
+          'homeroomTeacherEmail', 'parentName', 'parentWhatsapp',
+          'isActive', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'nis', 'nisn', 'name', 'gender', 'classId',
+          'homeroomTeacherEmail', 'parentName', 'parentWhatsapp',
+          'address', 'isActive', 'createdByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidStr(data.nis, 1, 40) &&
+        isValidStr(data.nisn, 0, 40) &&
+        isValidStr(data.name, 1, 160) &&
+        data.gender in ['L', 'P'] &&
+        isValidId(data.classId) &&
+        isValidStr(data.homeroomTeacherEmail, 0, 200) &&
+        isValidStr(data.parentName, 0, 160) &&
+        isValidStr(data.parentWhatsapp, 0, 30) &&
+        (!('address' in data) || isValidStr(data.address, 0, 400)) &&
+        data.isActive is bool &&
+        isValidStr(data.createdByUid, 1, 128) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDailyAttendance(data) {
+      return data.keys().hasAll([
+          'id', 'studentId', 'classId', 'homeroomTeacherEmail',
+          'date', 'status', 'recordedBy', 'recordedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'studentId', 'classId', 'homeroomTeacherEmail',
+          'date', 'status', 'note', 'attachmentUrl', 'attachmentName',
+          'attachmentUploadedAt', 'recordedBy', 'recordedByUid', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.studentId) &&
+        isValidId(data.classId) &&
+        isValidStr(data.homeroomTeacherEmail, 0, 200) &&
+        isValidStr(data.date, 10, 10) &&
+        data.status in ['H', 'S', 'I', 'A'] &&
+        (!('note' in data) || isValidStr(data.note, 0, 500)) &&
+        (!('attachmentUrl' in data) || isValidStr(data.attachmentUrl, 0, 750000)) &&
+        (!('attachmentName' in data) || isValidStr(data.attachmentName, 0, 200)) &&
+        (!('attachmentUploadedAt' in data) || isValidStr(data.attachmentUploadedAt, 0, 40)) &&
+        isValidStr(data.recordedBy, 1, 128) &&
+        isValidStr(data.recordedByUid, 1, 128) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidTeachingAttendance(data) {
+      return data.keys().hasAll([
+          'id', 'classId', 'className', 'qrToken', 'homeroomTeacherUid',
+          'homeroomTeacherEmail', 'teacherName', 'subject', 'date',
+          'arrivalTime', 'arrivalTimestampMs', 'status',
+          'recordedByUid', 'recordedByEmail', 'arrivalAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'classId', 'className', 'qrToken', 'homeroomTeacherUid',
+          'homeroomTeacherEmail', 'teacherName', 'teacherNip', 'subject',
+          'lessonPeriod', 'date', 'arrivalTime', 'completedTime',
+          'arrivalTimestampMs', 'completedTimestampMs', 'durationMinutes',
+          'status', 'arrivalNote', 'closingNote',
+          'recordedByUid', 'recordedByEmail', 'arrivalAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.classId) &&
+        isValidStr(data.className, 1, 80) &&
+        isValidId(data.qrToken) &&
+        data.qrToken.size() >= 6 &&
+        isValidStr(data.homeroomTeacherUid, 0, 128) &&
+        isValidStr(data.homeroomTeacherEmail, 0, 200) &&
+        isValidStr(data.teacherName, 1, 160) &&
+        (!('teacherNip' in data) || isValidStr(data.teacherNip, 0, 60)) &&
+        isValidStr(data.subject, 1, 160) &&
+        (!('lessonPeriod' in data) || isValidStr(data.lessonPeriod, 0, 40)) &&
+        isValidStr(data.date, 10, 10) &&
+        isValidStr(data.arrivalTime, 4, 12) &&
+        (!('completedTime' in data) || isValidStr(data.completedTime, 0, 12)) &&
+        data.arrivalTimestampMs is number &&
+        (!('completedTimestampMs' in data) || data.completedTimestampMs is number) &&
+        (!('durationMinutes' in data) || (data.durationMinutes is number && data.durationMinutes >= 0 && data.durationMinutes <= 1440)) &&
+        data.status in ['mengajar', 'selesai'] &&
+        (!('arrivalNote' in data) || isValidStr(data.arrivalNote, 0, 500)) &&
+        (!('closingNote' in data) || isValidStr(data.closingNote, 0, 500)) &&
+        isValidStr(data.recordedByUid, 1, 128) &&
+        isValidStr(data.recordedByEmail, 3, 200) &&
+        data.arrivalAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCorrectionLog(data) {
+      return data.keys().hasAll([
+          'id', 'studentId', 'studentName', 'classId', 'homeroomTeacherEmail',
+          'date', 'previousStatus', 'newStatus', 'reason',
+          'changedBy', 'changedByName', 'changedByUid', 'timestamp', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'studentId', 'studentName', 'classId', 'homeroomTeacherEmail',
+          'date', 'previousStatus', 'newStatus', 'reason',
+          'changedBy', 'changedByName', 'changedByUid', 'timestamp', 'createdAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.studentId) &&
+        isValidStr(data.studentName, 1, 160) &&
+        isValidId(data.classId) &&
+        isValidStr(data.homeroomTeacherEmail, 0, 200) &&
+        isValidStr(data.date, 10, 20) &&
+        data.previousStatus in ['H', 'S', 'I', 'A'] &&
+        data.newStatus in ['H', 'S', 'I', 'A'] &&
+        isValidStr(data.reason, 0, 400) &&
+        isValidStr(data.changedBy, 1, 128) &&
+        isValidStr(data.changedByName, 1, 160) &&
+        isValidStr(data.changedByUid, 1, 128) &&
+        isValidStr(data.timestamp, 1, 40) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidReportArchive(data) {
+      return data.keys().hasAll([
+          'id', 'studentId', 'studentName', 'classId', 'className',
+          'homeroomTeacherEmail', 'month', 'year', 'academicYear',
+          'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
+          'createdAt', 'createdByName', 'createdByUid', 'version',
+          'deliveryStatus', 'parentWhatsapp', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'studentId', 'studentName', 'classId', 'className',
+          'homeroomTeacherEmail', 'month', 'year', 'academicYear',
+          'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
+          'createdAt', 'createdByName', 'createdByUid', 'version', 'customNote',
+          'deliveryStatus', 'lastDeliveredAt', 'parentWhatsapp', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.studentId) &&
+        isValidStr(data.studentName, 1, 160) &&
+        isValidId(data.classId) &&
+        isValidStr(data.className, 1, 80) &&
+        isValidStr(data.homeroomTeacherEmail, 0, 200) &&
+        data.month is number && data.month >= 1 && data.month <= 12 &&
+        data.year is number && data.year >= 2000 && data.year <= 2100 &&
+        isValidStr(data.academicYear, 1, 40) &&
+        data.effectiveDays is number &&
+        data.hadir is number &&
+        data.sakit is number &&
+        data.izin is number &&
+        data.alpa is number &&
+        data.percentage is number &&
+        isValidStr(data.createdAt, 1, 40) &&
+        isValidStr(data.createdByName, 1, 160) &&
+        isValidStr(data.createdByUid, 1, 128) &&
+        data.version is number && data.version >= 1 &&
+        (!('customNote' in data) || isValidStr(data.customNote, 0, 600)) &&
+        data.deliveryStatus in ['belum_dikirim', 'terkirim', 'gagal'] &&
+        (!('lastDeliveredAt' in data) || isValidStr(data.lastDeliveredAt, 0, 40)) &&
+        isValidStr(data.parentWhatsapp, 0, 30) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['id', 'action', 'details', 'userId', 'userName', 'actorUid', 'timestamp', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'action', 'details', 'userId', 'userName', 'actorUid', 'timestamp', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidStr(data.action, 1, 160) &&
+        isValidStr(data.details, 0, 600) &&
+        isValidStr(data.userId, 1, 128) &&
+        isValidStr(data.userName, 1, 160) &&
+        isValidStr(data.actorUid, 1, 128) &&
+        isValidStr(data.timestamp, 1, 40) &&
+        data.createdAt is timestamp;
+    }
+
+    // === COLLECTION RULES ===
+
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && (isBootstrappedAdmin() || (isVerifiedUser() && request.auth.uid == uid));
+      allow list: if isBootstrappedAdmin();
+      allow create: if isBootstrappedAdmin() && isValidId(uid) && isValidAdminAllowlist(incoming()) &&
+        incoming().uid == uid && incoming().createdAt == request.time;
+      allow update: if isBootstrappedAdmin() && isValidId(uid) && isValidAdminAllowlist(incoming()) &&
+        incoming().uid == existing().uid && incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'grantedByUid']);
+      allow delete: if isBootstrappedAdmin() && isValidId(uid);
+    }
+
+    match /staff_bindings/{uid} {
+      allow get: if isValidId(uid) && (isAdmin() || (isVerifiedUser() && request.auth.uid == uid));
+      allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.uid == request.auth.uid);
+      allow create, update: if isVerifiedUser() && isValidId(uid) && request.auth.uid == uid &&
+        isValidStaffBinding(incoming()) &&
+        incoming().uid == uid &&
+        incoming().email == request.auth.token.email &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/users/$(incoming().userId)) &&
+        get(/databases/$(database)/documents/users/$(incoming().userId)).data.email == request.auth.token.email &&
+        get(/databases/$(database)/documents/users/$(incoming().userId)).data.isActive == true &&
+        incoming().role == get(/databases/$(database)/documents/users/$(incoming().userId)).data.role &&
+        incoming().assignedClassId == get(/databases/$(database)/documents/users/$(incoming().userId)).data.assignedClassId;
+      allow delete: if isAdmin() && isValidId(uid);
+    }
+
+    match /madrasah_config/{configId} {
+      allow get: if isValidId(configId) && (isAdmin() || isBoundStaff());
+      allow list: if false;
+      allow create, update: if isAdmin() && isValidId(configId) &&
+        (
+          (configId == 'main' && isValidMadrasahConfig(incoming())) ||
+          (configId == 'academic_snapshot' && isValidAcademicSnapshot(incoming()))
+        ) &&
+        incoming().updatedByUid == request.auth.uid &&
+        incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(configId);
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isAdmin() || (isVerifiedUser() && existing().email == request.auth.token.email));
+      allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.email == request.auth.token.email);
+      allow create: if isAdmin() && isValidId(userId) && isValidUserAccount(incoming()) &&
+        incoming().id == userId &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(userId) && isValidUserAccount(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['username', 'name', 'role', 'nip', 'email', 'authUid', 'assignedClassId', 'isActive', 'updatedAt'])) ||
+          (existing().email == request.auth.token.email && existing().isActive == true &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['authUid', 'updatedAt']) &&
+            incoming().authUid == request.auth.uid)
+        );
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    match /academic_years/{yearId} {
+      allow get: if isValidId(yearId) && (isAdmin() || isBoundStaff());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(yearId) && isValidAcademicYear(incoming()) &&
+        incoming().id == yearId &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(yearId) && isValidAcademicYear(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['year', 'semester', 'isActive', 'startDate', 'endDate', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(yearId);
+    }
+
+    match /calendar_events/{eventId} {
+      allow get: if isValidId(eventId) && (isAdmin() || isBoundStaff());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(eventId) && isValidCalendarEvent(incoming()) &&
+        incoming().id == eventId &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(eventId) && isValidCalendarEvent(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['date', 'title', 'type', 'isEffective', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(eventId);
+    }
+
+    match /classes/{classId} {
+      allow get: if isValidId(classId) && (isAdmin() || (isVerifiedUser() && existing().homeroomTeacherEmail == request.auth.token.email));
+      allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.homeroomTeacherEmail == request.auth.token.email);
+      allow create: if isAdmin() && isValidId(classId) && isValidSchoolClass(incoming()) &&
+        incoming().id == classId &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(classId) && isValidSchoolClass(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'grade', 'academicYearId', 'homeroomTeacherId',
+            'homeroomTeacherName', 'homeroomTeacherEmail', 'homeroomTeacherUid',
+            'qrToken', 'qrGeneratedAt', 'isActive', 'updatedAt'
+          ])) ||
+          (existing().homeroomTeacherEmail == request.auth.token.email &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['homeroomTeacherUid', 'updatedAt']) &&
+            incoming().homeroomTeacherUid == request.auth.uid)
+        );
+      allow delete: if isAdmin() && isValidId(classId);
+    }
+
+    match /class_qr_codes/{qrId} {
+      allow get: if isVerifiedUser() && isValidId(qrId);
+      allow list: if isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(qrId) && isValidClassQrCode(incoming()) &&
+        incoming().classId == qrId &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/classes/$(qrId));
+      allow update: if isVerifiedUser() && isValidId(qrId) && isValidClassQrCode(incoming()) &&
+        incoming().classId == existing().classId &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'className', 'grade', 'homeroomTeacherName', 'homeroomTeacherUid',
+            'qrToken', 'isActive', 'updatedAt'
+          ])) ||
+          (isBoundStaff() && boundClassId() == qrId &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['homeroomTeacherUid', 'updatedAt']) &&
+            incoming().homeroomTeacherUid == request.auth.uid)
+        );
+      allow delete: if isAdmin() && isValidId(qrId);
+    }
+
+    match /students/{studentId} {
+      allow get: if isValidId(studentId) && (isAdmin() || (isVerifiedUser() && existing().homeroomTeacherEmail == request.auth.token.email));
+      allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.homeroomTeacherEmail == request.auth.token.email);
+      allow create: if isAdmin() && isValidId(studentId) && isValidStudent(incoming()) &&
+        incoming().id == studentId &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/classes/$(incoming().classId));
+      allow update: if isAdmin() && isValidId(studentId) && isValidStudent(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'nis', 'nisn', 'name', 'gender', 'classId', 'homeroomTeacherEmail',
+          'parentName', 'parentWhatsapp', 'address', 'isActive', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(studentId);
+    }
+
+    match /daily_attendance/{recordId} {
+      allow get: if isValidId(recordId) && (isAdmin() || (isVerifiedUser() && existing().homeroomTeacherEmail == request.auth.token.email));
+      allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.homeroomTeacherEmail == request.auth.token.email);
+      allow create: if isVerifiedUser() && isValidId(recordId) && isValidDailyAttendance(incoming()) &&
+        incoming().id == recordId &&
+        incoming().recordedByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/students/$(incoming().studentId)) &&
+        exists(/databases/$(database)/documents/classes/$(incoming().classId)) &&
+        (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId));
+      allow update: if isVerifiedUser() && isValidId(recordId) && isValidDailyAttendance(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().studentId == existing().studentId &&
+        incoming().classId == existing().classId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().recordedByUid == existing().recordedByUid &&
+        incoming().updatedAt == request.time &&
+        (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'note', 'attachmentUrl', 'attachmentName', 'attachmentUploadedAt',
+            'homeroomTeacherEmail', 'recordedBy', 'updatedAt'
+          ])) ||
+          (isBoundStaff() && boundClassId() == existing().classId &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'note', 'attachmentUrl', 'attachmentName', 'attachmentUploadedAt', 'updatedAt'
+            ]))
+        );
+      allow delete: if isAdmin() && isValidId(recordId);
+    }
+
+    match /teaching_attendance/{sessionId} {
+      allow get: if isValidId(sessionId) && (
+        isAdmin() ||
+        (isVerifiedUser() && (
+          existing().recordedByUid == request.auth.uid ||
+          existing().homeroomTeacherUid == request.auth.uid ||
+          existing().homeroomTeacherEmail == request.auth.token.email
+        ))
+      );
+      allow list: if isBootstrappedAdmin() || (
+        isVerifiedUser() && (
+          resource.data.recordedByUid == request.auth.uid ||
+          resource.data.homeroomTeacherUid == request.auth.uid ||
+          resource.data.homeroomTeacherEmail == request.auth.token.email
+        )
+      );
+      allow create: if isVerifiedUser() && isValidId(sessionId) && isValidTeachingAttendance(incoming()) &&
+        incoming().id == sessionId &&
+        incoming().status == 'mengajar' &&
+        incoming().recordedByUid == request.auth.uid &&
+        incoming().recordedByEmail == request.auth.token.email &&
+        incoming().arrivalAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/class_qr_codes/$(incoming().classId)) &&
+        get(/databases/$(database)/documents/class_qr_codes/$(incoming().classId)).data.isActive == true &&
+        get(/databases/$(database)/documents/class_qr_codes/$(incoming().classId)).data.qrToken == incoming().qrToken;
+      allow update: if isVerifiedUser() && isValidId(sessionId) && isValidTeachingAttendance(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().classId == existing().classId &&
+        incoming().qrToken == existing().qrToken &&
+        incoming().recordedByUid == existing().recordedByUid &&
+        incoming().recordedByEmail == existing().recordedByEmail &&
+        incoming().arrivalAt == existing().arrivalAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'completedTime', 'completedTimestampMs', 'durationMinutes',
+            'closingNote', 'homeroomTeacherUid', 'homeroomTeacherEmail', 'updatedAt'
+          ])) ||
+          (existing().status == 'mengajar' &&
+            incoming().status == 'selesai' &&
+            existing().recordedByUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'completedTime', 'completedTimestampMs', 'durationMinutes', 'closingNote', 'updatedAt'
+            ])) ||
+          (isBoundStaff() && boundClassId() == existing().classId &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'homeroomTeacherUid', 'homeroomTeacherEmail', 'updatedAt'
+            ]))
+        );
+      allow delete: if isAdmin() && isValidId(sessionId);
+    }
+
+    match /correction_logs/{logId} {
+      allow get: if isValidId(logId) && (isAdmin() || (isVerifiedUser() && existing().homeroomTeacherEmail == request.auth.token.email));
+      allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.homeroomTeacherEmail == request.auth.token.email);
+      allow create: if isVerifiedUser() && isValidId(logId) && isValidCorrectionLog(incoming()) &&
+        incoming().id == logId &&
+        incoming().changedByUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/students/$(incoming().studentId)) &&
+        (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId));
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(logId);
+    }
+
+    match /report_archives/{archiveId} {
+      allow get: if isValidId(archiveId) && (isAdmin() || (isVerifiedUser() && existing().homeroomTeacherEmail == request.auth.token.email));
+      allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.homeroomTeacherEmail == request.auth.token.email);
+      allow create: if isVerifiedUser() && isValidId(archiveId) && isValidReportArchive(incoming()) &&
+        incoming().id == archiveId &&
+        incoming().createdByUid == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/students/$(incoming().studentId)) &&
+        (isAdmin() || (isBoundStaff() && boundClassId() == incoming().classId));
+      allow update: if isVerifiedUser() && isValidId(archiveId) && isValidReportArchive(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().studentId == existing().studentId &&
+        incoming().classId == existing().classId &&
+        incoming().createdByUid == existing().createdByUid &&
+        incoming().updatedAt == request.time &&
+        (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
+            'version', 'customNote', 'deliveryStatus', 'lastDeliveredAt',
+            'homeroomTeacherEmail', 'updatedAt'
+          ])) ||
+          (isBoundStaff() && boundClassId() == existing().classId &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'effectiveDays', 'hadir', 'sakit', 'izin', 'alpa', 'percentage',
+              'version', 'customNote', 'deliveryStatus', 'lastDeliveredAt', 'updatedAt'
+            ]))
+        );
+      allow delete: if isAdmin() && isValidId(archiveId);
+    }
+
+    match /audit_logs/{auditId} {
+      allow get: if isValidId(auditId) && (isAdmin() || (isVerifiedUser() && existing().actorUid == request.auth.uid));
+      allow list: if isBootstrappedAdmin() || (isVerifiedUser() && resource.data.actorUid == request.auth.uid);
+      allow create: if isVerifiedUser() && isValidId(auditId) && isValidAuditLog(incoming()) &&
+        incoming().id == auditId &&
+        incoming().actorUid == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        (isAdmin() || isBoundStaff());
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(auditId);
+    }
+  }
+}

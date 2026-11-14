@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -28,6 +28,10 @@ export const MadrasahSettingsView: React.FC<MadrasahSettingsViewProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setFormData({ ...profile });
+  }, [profile]);
 
   const processLogoFile = async (file: File) => {
     setUploadError(null);
@@ -401,7 +405,7 @@ export const MadrasahSettingsView: React.FC<MadrasahSettingsViewProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-[#0B192C]">Kosongkan Seluruh Data Aplikasi?</h3>
                 <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                  Tindakan ini akan menghapus seluruh data siswa, kelas, presensi, foto bukti, logo, dan arsip laporan yang tersimpan di browser ini.
+                  Tindakan ini akan menghapus seluruh data siswa, kelas, barcode QR, presensi siswa, rekap guru mengajar, foto bukti, logo, dan arsip laporan yang tersimpan di database cloud madrasah.
                 </p>
               </div>
             </div>

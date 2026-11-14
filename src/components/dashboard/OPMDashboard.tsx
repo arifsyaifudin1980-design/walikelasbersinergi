@@ -12,6 +12,7 @@ import {
   GraduationCap,
   KeyRound,
   Plus,
+  QrCode,
   School,
   Search,
   Settings,
@@ -35,6 +36,7 @@ import {
   Student,
   User,
 } from '../../types';
+import { ClassQrPosterModal } from '../teaching/ClassQrManagerView';
 
 export type OPMSection =
   | 'overview'
@@ -63,11 +65,14 @@ interface OPMDashboardProps {
   onAddStudent: (student: Omit<Student, 'id'>) => void;
   onUpdateStudent: (student: Student) => void;
   onDeleteStudent: (id: string) => void;
-  onImportStudents: (students: Omit<Student, 'id'>[]) => { added: number; skipped: number };
+  onImportStudents: (
+    students: Omit<Student, 'id'>[]
+  ) => Promise<{ added: number; skipped: number }> | { added: number; skipped: number };
   // Class CRUD
   onAddClass: (newClass: Omit<SchoolClass, 'id'>) => void;
   onUpdateClass: (updatedClass: SchoolClass) => void;
   onDeleteClass: (id: string) => void;
+  onRegenerateClassQr?: (schoolClass: SchoolClass) => Promise<void>;
   // Academic Year CRUD
   onAddAcademicYear: (year: Omit<AcademicYear, 'id'>) => void;
   onSetActiveAcademicYear: (id: string) => void;
@@ -103,6 +108,7 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
   onAddClass,
   onUpdateClass,
   onDeleteClass,
+  onRegenerateClassQr,
   onAddAcademicYear,
   onSetActiveAcademicYear,
   onDeleteAcademicYear,
@@ -117,6 +123,7 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>('all');
   const [auditTab, setAuditTab] = useState<'corrections' | 'system'>('corrections');
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  const [qrPreviewClass, setQrPreviewClass] = useState<SchoolClass | null>(null);
 
   // Student Add/Edit Modal
   const [studentModalOpen, setStudentModalOpen] = useState(false);
@@ -169,7 +176,7 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
   const [userForm, setUserForm] = useState({
     name: '',
     username: '',
-    password: '',
+    email: '',
     role: 'wali_kelas' as Role,
     nip: '',
     assignedClassId: '',
@@ -320,7 +327,7 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
       });
     });
 
-    const result = onImportStudents(parsed);
+    const result = await onImportStudents(parsed);
     showNotice(
       `Impor selesai: ${result.added} siswa ditambahkan, ${result.skipped} dilewati (duplikat/tidak valid).`
     );
@@ -430,7 +437,7 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
     setUserForm({
       name: '',
       username: '',
-      password: '',
+      email: '',
       role: 'wali_kelas',
       nip: '',
       assignedClassId: classes[0]?.id || '',
@@ -444,7 +451,7 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
     setUserForm({
       name: u.name,
       username: u.username,
-      password: u.password || '',
+      email: u.email || '',
       role: u.role,
       nip: u.nip || '',
       assignedClassId: u.assignedClassId || '',
@@ -456,16 +463,19 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
   const handleSaveUser = (e: React.FormEvent) => {
     e.preventDefault();
     if (!userForm.name.trim() || !userForm.username.trim()) return;
+    const cleanEmail = userForm.email.trim();
     if (editingUser) {
       onUpdateUser({
         ...editingUser,
         ...userForm,
+        email: cleanEmail,
         assignedClassId: userForm.role === 'wali_kelas' ? userForm.assignedClassId : undefined,
       });
       showNotice(`Akun "${userForm.name}" diperbarui.`);
     } else {
       onAddUser({
         ...userForm,
+        email: cleanEmail,
         assignedClassId: userForm.role === 'wali_kelas' ? userForm.assignedClassId : undefined,
       });
       showNotice(`Akun "${userForm.name}" berhasil dibuat.`);
@@ -636,11 +646,11 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => onNavigateSection('opm_students')}
+                      onClick={() => onNavigateSection('opm_qr_classes')}
                       className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
                     >
-                      <Users className="w-4 h-4 text-emerald-400" />
-                      <span>Data Siswa</span>
+                      <QrCode className="w-4 h-4 text-emerald-400" />
+                      <span>Barcode QR Kelas</span>
                     </button>
                     <button
                       type="button"
@@ -1370,17 +1380,27 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                 Manajemen Kelas &amp; Penugasan Wali Kelas
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Buat rombongan belajar dan tugaskan wali kelas untuk masing-masing kelas.
+                Buat rombongan belajar, tugaskan wali kelas, serta generate poster Barcode QR untuk absensi guru.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={openAddClass}
-              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl btn-navy text-xs font-semibold cursor-pointer whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4 text-emerald-400" />
-              <span>Tambah Kelas</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onNavigateSection('opm_qr_classes')}
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-[#0B192C] text-xs font-semibold cursor-pointer whitespace-nowrap"
+              >
+                <QrCode className="w-4 h-4 text-emerald-700" />
+                <span>Semua Barcode QR</span>
+              </button>
+              <button
+                type="button"
+                onClick={openAddClass}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl btn-navy text-xs font-semibold cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4 text-emerald-400" />
+                <span>Tambah Kelas</span>
+              </button>
+            </div>
           </div>
 
           {classes.length === 0 ? (
@@ -1421,6 +1441,14 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setQrPreviewClass(cls)}
+                            className="p-2 text-emerald-700 hover:bg-emerald-50 rounded-lg cursor-pointer"
+                            title="Barcode QR Kelas"
+                          >
+                            <QrCode className="w-4 h-4" />
+                          </button>
                           <button
                             type="button"
                             onClick={() => openEditClass(cls)}
@@ -1465,6 +1493,7 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                       <th className="py-2.5 px-4">Tahun Pelajaran</th>
                       <th className="py-2.5 px-4">Wali Kelas</th>
                       <th className="py-2.5 px-4 text-right">Siswa</th>
+                      <th className="py-2.5 px-4 text-center">Barcode QR</th>
                       <th className="py-2.5 px-4 text-center">Aksi</th>
                     </tr>
                   </thead>
@@ -1486,6 +1515,16 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                           </td>
                           <td className="py-3 px-4 text-right font-semibold tabular-nums">
                             {count}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setQrPreviewClass(cls)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-[11px] font-semibold cursor-pointer"
+                            >
+                              <QrCode className="w-3.5 h-3.5" />
+                              <span>Lihat QR</span>
+                            </button>
                           </td>
                           <td className="py-3 px-4 text-center">
                             <div className="inline-flex items-center gap-1">
@@ -1852,10 +1891,10 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                   className="rounded-xl border border-slate-200 p-4 space-y-2.5 bg-white"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
+                      <div className="min-w-0">
                       <div className="font-bold text-sm text-slate-900 truncate">{u.name}</div>
-                      <div className="text-[11px] text-slate-500 font-mono tabular-nums mt-0.5">
-                        @{u.username} {u.nip ? `· NIP ${u.nip}` : ''}
+                      <div className="text-[11px] text-slate-500 font-mono tabular-nums mt-0.5 truncate">
+                        @{u.username} {u.email ? `· ${u.email}` : ''} {u.nip ? `· NIP ${u.nip}` : ''}
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
@@ -1908,7 +1947,7 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
               <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
                 <tr>
                   <th className="py-2.5 px-4">Nama Lengkap</th>
-                  <th className="py-2.5 px-4">Username</th>
+                  <th className="py-2.5 px-4">Email Google (Login)</th>
                   <th className="py-2.5 px-4">Role</th>
                   <th className="py-2.5 px-4">Kelas Ditugaskan</th>
                   <th className="py-2.5 px-4">Status</th>
@@ -1923,13 +1962,18 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                     <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-2.5 px-4">
                         <div className="font-semibold text-slate-900">{u.name}</div>
-                        {u.nip && (
-                          <div className="text-[11px] text-slate-400 font-mono tabular-nums">
-                            NIP {u.nip}
-                          </div>
+                        <div className="text-[11px] text-slate-400 font-mono tabular-nums">
+                          @{u.username}
+                          {u.nip ? ` · NIP ${u.nip}` : ''}
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-4 font-mono text-slate-700">
+                        {u.email ? (
+                          <span>{u.email}</span>
+                        ) : (
+                          <span className="text-amber-600 italic font-sans">Belum diisi</span>
                         )}
                       </td>
-                      <td className="py-2.5 px-4 font-mono text-slate-700">{u.username}</td>
                       <td className="py-2.5 px-4">
                         {u.role === 'opm' ? 'Administrator / OPM' : 'Wali Kelas'}
                       </td>
@@ -2577,7 +2621,7 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                     className="app-input"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">Username *</label>
                     <input
@@ -2589,16 +2633,22 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Password</label>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Email Google (untuk Login) *
+                    </label>
                     <input
-                      type="text"
-                      value={userForm.password}
-                      onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                      placeholder="Kosongkan jika tetap"
+                      type="email"
+                      required={userForm.role === 'wali_kelas'}
+                      value={userForm.email}
+                      onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                      placeholder="guru@gmail.com"
                       className="app-input font-mono"
                     />
                   </div>
                 </div>
+                <p className="text-[11px] text-slate-500 -mt-1">
+                  Pengguna login menggunakan akun Google sesuai alamat email di atas agar data presensi &amp; rekap kelas tersinkronisasi aman di cloud.
+                </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block font-semibold text-slate-700 mb-1">Role</label>
@@ -2659,6 +2709,15 @@ export const OPMDashboard: React.FC<OPMDashboardProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {qrPreviewClass && (
+        <ClassQrPosterModal
+          schoolClass={classes.find((c) => c.id === qrPreviewClass.id) || qrPreviewClass}
+          madrasah={madrasah}
+          onRegenerateQr={onRegenerateClassQr}
+          onClose={() => setQrPreviewClass(null)}
+        />
       )}
     </div>
   );

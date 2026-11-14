@@ -1,6 +1,6 @@
 /**
  * Data structures and types for Aplikasi Monitoring dan Laporan Presensi Siswa
- * Based on PRD v5.0
+ * Based on PRD v5.0 + Teacher Teaching QR Attendance Extension
  */
 
 export type Role = 'opm' | 'wali_kelas';
@@ -14,6 +14,8 @@ export interface User {
   name: string;
   role: Role;
   nip?: string;
+  email?: string;
+  authUid?: string;
   assignedClassId?: string; // For Wali Kelas
   isActive: boolean;
 }
@@ -57,6 +59,20 @@ export interface SchoolClass {
   academicYearId: string;
   homeroomTeacherId: string;
   homeroomTeacherName: string;
+  homeroomTeacherEmail?: string;
+  homeroomTeacherUid?: string;
+  qrToken?: string;
+  qrGeneratedAt?: string;
+  isActive: boolean;
+}
+
+export interface ClassQrCodeRegistry {
+  classId: string;
+  className: string;
+  grade: string;
+  homeroomTeacherName: string;
+  homeroomTeacherUid: string;
+  qrToken: string;
   isActive: boolean;
 }
 
@@ -67,6 +83,7 @@ export interface Student {
   name: string;
   gender: 'L' | 'P';
   classId: string;
+  homeroomTeacherEmail?: string;
   parentName: string;
   parentWhatsapp: string;
   isActive: boolean;
@@ -77,6 +94,7 @@ export interface DailyAttendanceRecord {
   id: string;
   studentId: string;
   classId: string;
+  homeroomTeacherEmail?: string;
   date: string; // YYYY-MM-DD
   status: AttendanceStatus;
   note?: string;
@@ -84,14 +102,41 @@ export interface DailyAttendanceRecord {
   attachmentName?: string;
   attachmentUploadedAt?: string;
   recordedBy: string;
+  recordedByUid?: string;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface TeachingAttendanceRecord {
+  id: string;
+  classId: string;
+  className: string;
+  qrToken: string;
+  homeroomTeacherUid: string;
+  homeroomTeacherEmail: string;
+  teacherName: string;
+  teacherNip?: string;
+  subject: string;
+  lessonPeriod?: string;
+  date: string; // YYYY-MM-DD
+  arrivalTime: string; // HH:mm
+  completedTime?: string; // HH:mm
+  arrivalTimestampMs: number;
+  completedTimestampMs?: number;
+  durationMinutes?: number;
+  status: 'mengajar' | 'selesai';
+  arrivalNote?: string;
+  closingNote?: string;
+  recordedByUid: string;
+  recordedByEmail: string;
 }
 
 export interface AttendanceCorrectionLog {
   id: string;
   studentId: string;
   studentName: string;
+  classId?: string;
+  homeroomTeacherEmail?: string;
   date: string;
   previousStatus: AttendanceStatus;
   newStatus: AttendanceStatus;
@@ -137,6 +182,7 @@ export interface ReportArchiveItem {
   studentName: string;
   classId: string;
   className: string;
+  homeroomTeacherEmail?: string;
   month: number;
   year: number;
   academicYear: string;
@@ -148,6 +194,7 @@ export interface ReportArchiveItem {
   percentage: number;
   createdAt: string;
   createdByName: string;
+  createdByUid?: string;
   version: number;
   customNote?: string;
   deliveryStatus: 'belum_dikirim' | 'terkirim' | 'gagal';

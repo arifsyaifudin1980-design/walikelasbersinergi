@@ -3,7 +3,9 @@ import {
   AlertCircle,
   Archive,
   ArrowDownUp,
+  BookOpenCheck,
   CheckCircle2,
+  Clock,
   Eye,
   FileSpreadsheet,
   PieChart,
@@ -16,6 +18,7 @@ import {
   MadrasahProfile,
   SchoolClass,
   StudentMonthlyRecap,
+  TeachingAttendanceRecord,
   User,
 } from '../../types';
 import { DonutChart } from '../common/DonutChart';
@@ -25,6 +28,7 @@ interface WaliKelasDashboardProps {
   schoolClass?: SchoolClass;
   madrasah: MadrasahProfile;
   recapSummary: ClassMonthlySummary;
+  todayTeachingRecords?: TeachingAttendanceRecord[];
   selectedMonth: number;
   selectedYear: number;
   onChangeMonthYear: (month: number, year: number) => void;
@@ -33,6 +37,7 @@ interface WaliKelasDashboardProps {
   onSelectStudentReport: (recap: StudentMonthlyRecap) => void;
   onOpenBatchExport: () => void;
   onGoToMatrix: () => void;
+  onGoToTeachingRecap?: () => void;
 }
 
 const MONTH_NAMES = [
@@ -54,6 +59,7 @@ export const WaliKelasDashboard: React.FC<WaliKelasDashboardProps> = ({
   currentUser,
   schoolClass,
   recapSummary,
+  todayTeachingRecords = [],
   selectedMonth,
   selectedYear,
   onChangeMonthYear,
@@ -62,6 +68,7 @@ export const WaliKelasDashboard: React.FC<WaliKelasDashboardProps> = ({
   onSelectStudentReport,
   onOpenBatchExport,
   onGoToMatrix,
+  onGoToTeachingRecap,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'incomplete' | 'attention' | 'perfect'>('all');
@@ -377,6 +384,86 @@ export const WaliKelasDashboard: React.FC<WaliKelasDashboardProps> = ({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Rekap Kedatangan & Selesai Guru Mengajar Hari Ini */}
+      <div className="surface-card p-5 sm:p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200/80 text-emerald-700 flex items-center justify-center shrink-0">
+              <BookOpenCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-[#0B192C]">
+                Rekap Guru Mengajar Hari Ini (Kelas {schoolClass.name})
+              </h3>
+              <p className="text-xs text-slate-500">
+                Pantauan otomatis scan QR kedatangan &amp; selesai mengajar guru di kelas Anda.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <span className="px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold tabular-nums">
+              Sedang Ngajar: {todayTeachingRecords.filter((r) => r.status === 'mengajar').length}
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-semibold tabular-nums">
+              Selesai: {todayTeachingRecords.filter((r) => r.status === 'selesai').length}
+            </span>
+            {onGoToTeachingRecap && (
+              <button
+                type="button"
+                onClick={onGoToTeachingRecap}
+                className="px-3 py-1.5 rounded-lg btn-navy text-[11px] font-semibold cursor-pointer"
+              >
+                Lihat Rekap Lengkap
+              </button>
+            )}
+          </div>
+        </div>
+
+        {todayTeachingRecords.length === 0 ? (
+          <div className="p-4 rounded-xl bg-[#F6F8FB] border border-dashed border-slate-200 text-xs text-slate-500 text-center">
+            Belum ada guru mengajar yang melakukan scan QR Barcode kelas hari ini.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {todayTeachingRecords.slice(0, 4).map((rec) => (
+              <div
+                key={rec.id}
+                className="rounded-xl border border-slate-200/90 bg-[#F6F8FB] p-3.5 space-y-2 text-xs"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-bold text-[#0B192C] truncate">{rec.teacherName}</div>
+                    <div className="text-[11px] text-slate-600 truncate">
+                      {rec.subject}
+                      {rec.lessonPeriod ? ` · Jam ke-${rec.lessonPeriod}` : ''}
+                    </div>
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 ${
+                      rec.status === 'mengajar'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-emerald-100 text-emerald-800'
+                    }`}
+                  >
+                    {rec.status === 'mengajar' ? 'Mengajar' : 'Selesai'}
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-[11px] font-mono tabular-nums text-slate-600">
+                  <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
+                    <Clock className="w-3 h-3" />
+                    {rec.arrivalTime}
+                  </span>
+                  <span>
+                    {rec.completedTime ? `s.d. ${rec.completedTime}` : 'Belum selesai'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Empty State when class has 0 students */}

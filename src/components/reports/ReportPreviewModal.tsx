@@ -98,7 +98,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
       customNote,
     });
 
-    storageService.saveArchiveItem({
+    await storageService.saveArchiveItem({
       id: `rep_${recap.student.id}_${recap.month}_${recap.year}`,
       studentId: recap.student.id,
       studentName: recap.student.name,
@@ -143,7 +143,7 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
       customNote,
     };
 
-    storageService.saveArchiveItem({
+    await storageService.saveArchiveItem({
       id: `rep_${recap.student.id}_${recap.month}_${recap.year}`,
       studentId: recap.student.id,
       studentName: recap.student.name,

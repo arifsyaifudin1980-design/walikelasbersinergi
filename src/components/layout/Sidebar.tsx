@@ -1,11 +1,16 @@
 import React from 'react';
 import {
+  BookOpenCheck,
   Calendar,
   FileSpreadsheet,
   GraduationCap,
   History,
+  Home,
   Image as ImageIcon,
   LayoutDashboard,
+  LogOut,
+  QrCode,
+  ScanLine,
   School,
   Server,
   Settings,
@@ -30,6 +35,9 @@ interface SidebarProps {
   setActiveTab: (tab: string) => void;
   isOpenMobile: boolean;
   onCloseMobile: () => void;
+  onOpenScanner: () => void;
+  onBackToPortal: () => void;
+  onSignOut: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -39,12 +47,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   isOpenMobile,
   onCloseMobile,
+  onOpenScanner,
+  onBackToPortal,
+  onSignOut,
 }) => {
   const opmItems: NavItem[] = [
     { id: 'opm_overview', label: 'Ringkasan Sistem', icon: LayoutDashboard, group: 'Utama' },
     { id: 'attendance_matrix', label: 'Input Presensi & Foto', icon: FileSpreadsheet, group: 'Utama' },
+    { id: 'teaching_recap', label: 'Rekap Guru Ngajar', icon: BookOpenCheck, group: 'Utama' },
     { id: 'opm_students', label: 'Data Siswa', icon: Users, group: 'Master Data' },
     { id: 'opm_classes', label: 'Kelas & Wali Kelas', icon: School, group: 'Master Data' },
+    { id: 'opm_qr_classes', label: 'Barcode QR Kelas', icon: QrCode, group: 'Master Data' },
     { id: 'opm_academic_years', label: 'Tahun Pelajaran', icon: GraduationCap, group: 'Master Data' },
     { id: 'opm_calendar', label: 'Kalender Akademik', icon: Calendar, group: 'Master Data' },
     { id: 'archives', label: 'Arsip Laporan JPG', icon: History, group: 'Laporan' },
@@ -57,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const waliItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard Kelas', icon: LayoutDashboard, group: 'Utama' },
     { id: 'attendance_matrix', label: 'Input Presensi & Foto', icon: FileSpreadsheet, group: 'Utama' },
+    { id: 'teaching_recap', label: 'Rekap Guru Ngajar', icon: BookOpenCheck, group: 'Utama' },
     { id: 'archives', label: 'Arsip & Riwayat WA', icon: History, group: 'Laporan' },
   ];
 
@@ -156,8 +170,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ))}
       </nav>
 
-      {/* Bottom Institutional Context */}
-      <div className="p-3 border-t border-white/10 bg-[#081322]">
+      {/* Bottom Institutional Context + Quick Scanner & Portal Switch */}
+      <div className="p-3 border-t border-white/10 bg-[#081322] space-y-2.5">
+        <button
+          type="button"
+          onClick={() => {
+            onCloseMobile();
+            onOpenScanner();
+          }}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors cursor-pointer"
+        >
+          <ScanLine className="w-3.5 h-3.5" />
+          <span>Buka Kamera Scan QR</span>
+        </button>
+
         <div className="flex items-center gap-3 px-2.5 py-2 rounded-xl bg-white/[0.04] border border-white/5">
           <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
             {currentUser.name.charAt(0).toUpperCase()}
@@ -170,6 +196,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {currentUser.role === 'opm' ? 'Administrator / OPM' : 'Wali Kelas'}
             </div>
           </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              onCloseMobile();
+              onBackToPortal();
+            }}
+            className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] font-medium text-slate-300 cursor-pointer"
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span>Portal</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onCloseMobile();
+              onSignOut();
+            }}
+            className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-rose-500/20 hover:text-rose-200 text-[11px] font-medium text-slate-300 cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Keluar</span>
+          </button>
         </div>
       </div>
     </div>

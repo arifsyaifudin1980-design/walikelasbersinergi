@@ -1,4 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { onAuthStateChanged, signInWithPopup, signOut, User as FirebaseAuthUser } from 'firebase/auth';
+import { AlertCircle, X } from 'lucide-react';
+import { auth, googleProvider } from './firebase';
 import {
   AcademicCalendarEvent,
   AcademicYear,
@@ -11,9 +14,20 @@ import {
   SchoolClass,
   Student,
   StudentMonthlyRecap,
+  TeachingAttendanceRecord,
   User,
 } from './types';
-import { storageService } from './services/storage';
+import {
+  EMPTY_MADRASAH,
+  firestoreService,
+  formatDateYYYYMMDD,
+  ResolvedAuthProfile,
+} from './services/firestoreService';
+import { calculateClassRecapFromData } from './services/storage';
+import { EntryPortal } from './components/auth/EntryPortal';
+import { TeachingQRScanner } from './components/teaching/TeachingQRScanner';
+import { ClassQrManagerView } from './components/teaching/ClassQrManagerView';
+import { TeachingRecapView } from './components/teaching/TeachingRecapView';
 import { Sidebar } from './components/layout/Sidebar';
 import { Topbar } from './components/layout/Topbar';
 import { WaliKelasDashboard } from './components/dashboard/WaliKelasDashboard';
@@ -34,12 +48,16 @@ interface ReportModalContext {
   homeroomTeacherNip?: string;
 }
 
+type PortalView = 'portal' | 'scanner' | 'app';
+
 const TAB_META: Record<string, { title: string; section: string }> = {
   opm_overview: { title: 'Ringkasan Sistem', section: 'Utama' },
   dashboard: { title: 'Dashboard Kelas', section: 'Utama' },
   attendance_matrix: { title: 'Input Presensi & Foto', section: 'Utama' },
+  teaching_recap: { title: 'Rekap Guru Mengajar', section: 'Utama' },
   opm_students: { title: 'Data Siswa', section: 'Master Data' },
   opm_classes: { title: 'Kelas & Wali Kelas', section: 'Master Data' },
+  opm_qr_classes: { title: 'Barcode QR Kelas', section: 'Master Data' },
   opm_academic_years: { title: 'Tahun Pelajaran', section: 'Master Data' },
   opm_calendar: { title: 'Kalender Akademik', section: 'Master Data' },
   opm_users: { title: 'Akun Pengguna', section: 'Administrasi' },
@@ -60,50 +78,183 @@ const OPM_TAB_TO_SECTION: Record<string, OPMSection> = {
 };
 
 export default function App() {
-  // Global Application State (Zero dummy data)
-  const [currentUser, setCurrentUser] = useState<User>(() => storageService.getCurrentUser());
-  const [users, setUsers] = useState<User[]>(() => storageService.getUsers());
-  const [madrasah, setMadrasah] = useState<MadrasahProfile>(() => storageService.getMadrasahProfile());
-  const [classes, setClasses] = useState<SchoolClass[]>(() => storageService.getClasses());
-  const [students, setStudents] = useState<Student[]>(() => storageService.getStudents());
-  const [academicYears, setAcademicYears] = useState<AcademicYear[]>(() =>
-    storageService.getAcademicYears()
-  );
-  const [calendarEvents, setCalendarEvents] = useState<AcademicCalendarEvent[]>(() =>
-    storageService.getCalendarEvents()
-  );
-  const [attendanceRecords, setAttendanceRecords] = useState<DailyAttendanceRecord[]>(() =>
-    storageService.getAttendance()
-  );
-  const [correctionLogs, setCorrectionLogs] = useState<AttendanceCorrectionLog[]>(() =>
-    storageService.getCorrectionLogs()
-  );
-  const [archives, setArchives] = useState<ReportArchiveItem[]>(() => storageService.getArchives());
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => storageService.getAuditLogs());
+  // === AUTHENTICATION & ENTRY PORTAL STATE ===
+  const [portalView, setPortalView] = useState<PortalView>('portal');
+  const [authUser, setAuthUser] = useState<FirebaseAuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [resolvedProfile, setResolvedProfile] = useState<ResolvedAuthProfile | null>(null);
+  const [previewUserId, setPreviewUserId] = useState<string | null>(null);
+  const enterAppAfterLoginRef = useRef<boolean>(false);
+  const syncedQrClassIdsRef = useRef<Set<string>>(new Set());
 
-  // Navigation & Period State
+  // === CLOUD FIRESTORE REAL-TIME STATE ===
+  const [madrasah, setMadrasah] = useState<MadrasahProfile>(EMPTY_MADRASAH);
+  const [users, setUsers] = useState<User[]>([]);
+  const [classes, setClasses] = useState<SchoolClass[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<AcademicCalendarEvent[]>([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<DailyAttendanceRecord[]>([]);
+  const [teachingRecords, setTeachingRecords] = useState<TeachingAttendanceRecord[]>([]);
+  const [correctionLogs, setCorrectionLogs] = useState<AttendanceCorrectionLog[]>([]);
+  const [archives, setArchives] = useState<ReportArchiveItem[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // === NAVIGATION & PERIOD STATE ===
   const now = new Date();
-  const [activeTab, setActiveTab] = useState<string>(() => {
-    const initialUser = storageService.getCurrentUser();
-    return initialUser.role === 'opm' ? 'opm_overview' : 'dashboard';
-  });
+  const [activeTab, setActiveTab] = useState<string>('opm_overview');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
-  const [selectedClassIdForMatrix, setSelectedClassIdForMatrix] = useState<string>(() => {
-    const initialClasses = storageService.getClasses();
-    return initialClasses[0]?.id || '';
-  });
+  const [selectedClassIdForMatrix, setSelectedClassIdForMatrix] = useState<string>('');
 
-  // Modal States
+  // === MODAL STATES ===
   const [reportModalContext, setReportModalContext] = useState<ReportModalContext | null>(null);
   const [showBatchExportModal, setShowBatchExportModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
 
-  const refreshAuditAndLogs = () => {
-    setCorrectionLogs(storageService.getCorrectionLogs());
-    setAuditLogs(storageService.getAuditLogs());
+  // Listen to Firebase Authentication State
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      setAuthUser(fbUser);
+      setAuthError(null);
+      if (!fbUser) {
+        setResolvedProfile(null);
+        setPreviewUserId(null);
+        setUsers([]);
+        setClasses([]);
+        setStudents([]);
+        setAcademicYears([]);
+        setCalendarEvents([]);
+        setAttendanceRecords([]);
+        setTeachingRecords([]);
+        setCorrectionLogs([]);
+        setArchives([]);
+        setAuditLogs([]);
+        setAuthLoading(false);
+        return;
+      }
+
+      setAuthLoading(true);
+      try {
+        const resolved = await firestoreService.resolveUserSession(fbUser);
+        setResolvedProfile(resolved);
+        setPreviewUserId(null);
+
+        if (resolved.isAdmin || resolved.isBoundStaff) {
+          setActiveTab(resolved.appUser?.role === 'opm' ? 'opm_overview' : 'dashboard');
+          if (enterAppAfterLoginRef.current) {
+            setPortalView('app');
+            enterAppAfterLoginRef.current = false;
+          }
+        } else {
+          enterAppAfterLoginRef.current = false;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Gagal memverifikasi akun Google Anda.';
+        setAuthError(msg);
+        enterAppAfterLoginRef.current = false;
+      } finally {
+        setAuthLoading(false);
+      }
+    });
+
+    return () => unsub();
+  }, []);
+
+  // Subscribe to Firestore Cloud Collections once staff session is verified
+  useEffect(() => {
+    if (!resolvedProfile || (!resolvedProfile.isAdmin && !resolvedProfile.isBoundStaff)) {
+      return;
+    }
+
+    const unsub = firestoreService.subscribePortalData(resolvedProfile, {
+      onMadrasah: setMadrasah,
+      onUsers: setUsers,
+      onAcademicYears: setAcademicYears,
+      onCalendarEvents: setCalendarEvents,
+      onClasses: (list) => {
+        setClasses(list);
+        setSelectedClassIdForMatrix((prev) =>
+          prev && list.some((c) => c.id === prev) ? prev : list[0]?.id || ''
+        );
+      },
+      onStudents: setStudents,
+      onAttendance: setAttendanceRecords,
+      onTeachingAttendance: setTeachingRecords,
+      onCorrections: setCorrectionLogs,
+      onArchives: setArchives,
+      onAuditLogs: setAuditLogs,
+      onError: (err) => {
+        setActionError(`Sinkronisasi cloud terganggu: ${err.message}`);
+      },
+    });
+
+    return () => unsub();
+  }, [resolvedProfile]);
+
+  // Admin background sync: ensure all classes have QR registry & backfill Wali Kelas UID onto teaching records
+  useEffect(() => {
+    if (!resolvedProfile?.isAdmin || !authUser || classes.length === 0) return;
+    const unsynced = classes.filter(
+      (c) => !c.qrToken || !syncedQrClassIdsRef.current.has(c.id)
+    );
+    if (unsynced.length > 0) {
+      unsynced.forEach((c) => syncedQrClassIdsRef.current.add(c.id));
+      void firestoreService.ensureClassQrRegistries(unsynced, authUser.uid);
+    }
+  }, [resolvedProfile?.isAdmin, authUser, classes]);
+
+  useEffect(() => {
+    if (!resolvedProfile?.isAdmin || classes.length === 0 || teachingRecords.length === 0) return;
+    void firestoreService.syncMissingTeachingHomeroomUid(classes, teachingRecords);
+  }, [resolvedProfile?.isAdmin, classes, teachingRecords]);
+
+  // Trigger Google Login Popup
+  const handleGoogleLogin = async (enterDashboardOnSuccess: boolean) => {
+    setAuthError(null);
+    enterAppAfterLoginRef.current = enterDashboardOnSuccess;
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      enterAppAfterLoginRef.current = false;
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/popup-closed-by-user') {
+        return;
+      }
+      setAuthError('Login Google dibatalkan atau gagal. Pastikan pop-up diizinkan browser.');
+    }
   };
+
+  const handleSignOut = async () => {
+    enterAppAfterLoginRef.current = false;
+    await signOut(auth);
+    setPortalView('portal');
+  };
+
+  // Effective Active User (real auth user, or Admin previewing a Wali Kelas account)
+  const currentUser: User = useMemo(() => {
+    if (resolvedProfile?.isAdmin && previewUserId) {
+      const preview = users.find((u) => u.id === previewUserId && u.isActive);
+      if (preview) return preview;
+    }
+    return (
+      resolvedProfile?.appUser || {
+        id: authUser?.uid || 'guest',
+        username: authUser?.email || 'user',
+        name: authUser?.displayName || 'Pengguna Madrasah',
+        role: 'wali_kelas',
+        isActive: true,
+      }
+    );
+  }, [resolvedProfile, previewUserId, users, authUser]);
+
+  const actorForLogs: User = useMemo(
+    () => resolvedProfile?.appUser || currentUser,
+    [resolvedProfile?.appUser, currentUser]
+  );
 
   // Resolve active class for current role
   const effectiveMatrixClassId = useMemo(() => {
@@ -131,14 +282,35 @@ export default function App() {
 
   // Dynamic Class Recap Calculation
   const classRecap = useMemo(() => {
-    return storageService.calculateClassRecap(
+    return calculateClassRecapFromData(
       activeClass?.id || '',
       selectedMonth,
-      selectedYear
+      selectedYear,
+      classes,
+      students,
+      calendarEvents,
+      attendanceRecords
     );
   }, [activeClass?.id, selectedMonth, selectedYear, attendanceRecords, calendarEvents, students, classes]);
 
-  // Attendance update handler (supports status, reason, note, and photo attachments)
+  const todayTeachingRecordsForActiveClass = useMemo(() => {
+    if (!activeClass?.id) return [];
+    const todayStr = formatDateYYYYMMDD();
+    return teachingRecords.filter((r) => r.classId === activeClass.id && r.date === todayStr);
+  }, [teachingRecords, activeClass?.id]);
+
+  // Helper to wrap async cloud mutations
+  const runCloudAction = async (fn: () => Promise<unknown>) => {
+    setActionError(null);
+    try {
+      await fn();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gagal menyimpan perubahan ke database cloud.';
+      setActionError(msg);
+    }
+  };
+
+  // === FIRESTORE CRUD HANDLERS ===
   const handleUpdateAttendance = (
     studentId: string,
     classId: string,
@@ -152,148 +324,249 @@ export default function App() {
       removeAttachment?: boolean;
     }
   ) => {
-    storageService.setStudentAttendance(studentId, classId, date, status, currentUser, options);
-    setAttendanceRecords(storageService.getAttendance());
-    refreshAuditAndLogs();
+    if (!authUser) return;
+    void runCloudAction(() =>
+      firestoreService.setStudentAttendance(
+        studentId,
+        classId,
+        date,
+        status,
+        actorForLogs,
+        authUser.uid,
+        classes,
+        students,
+        attendanceRecords,
+        options
+      )
+    );
   };
 
-  // Bulk set Hadir
   const handleBulkSetHadir = (classId: string, date: string) => {
-    storageService.bulkSetClassAttendance(classId, date, 'H', currentUser);
-    setAttendanceRecords(storageService.getAttendance());
-    refreshAuditAndLogs();
+    if (!authUser) return;
+    void runCloudAction(() =>
+      firestoreService.bulkSetClassAttendance(
+        classId,
+        date,
+        'H',
+        actorForLogs,
+        authUser.uid,
+        classes,
+        students,
+        attendanceRecords
+      )
+    );
   };
 
-  // Switch User
   const handleSwitchUser = (user: User) => {
-    setCurrentUser(user);
-    storageService.setCurrentUser(user);
+    if (!resolvedProfile?.isAdmin) return;
+    setPreviewUserId(user.id === resolvedProfile.appUser?.id ? null : user.id);
     setActiveTab(user.role === 'opm' ? 'opm_overview' : 'dashboard');
   };
 
-  // Madrasah Profile
   const handleSaveProfile = (newProfile: MadrasahProfile) => {
-    setMadrasah(newProfile);
-    storageService.saveMadrasahProfile(newProfile);
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    void runCloudAction(() =>
+      firestoreService.saveMadrasahProfile(newProfile, actorForLogs, authUser.uid)
+    );
   };
 
-  // Students CRUD
   const handleAddStudent = (newStudent: Omit<Student, 'id'>) => {
-    const updated = storageService.addStudent(newStudent);
-    setStudents(updated);
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    void runCloudAction(async () => {
+      await firestoreService.addStudent(newStudent, classes, actorForLogs, authUser.uid);
+    });
   };
 
   const handleUpdateStudent = (student: Student) => {
-    const updated = storageService.updateStudent(student);
-    setStudents(updated);
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    void runCloudAction(() =>
+      firestoreService.updateStudent(student, classes, actorForLogs, authUser.uid)
+    );
   };
 
   const handleDeleteStudent = (id: string) => {
-    const updated = storageService.deleteStudent(id);
-    setStudents(updated);
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    const target = students.find((s) => s.id === id);
+    if (!target) return;
+    void runCloudAction(() =>
+      firestoreService.deleteStudent(target, actorForLogs, authUser.uid)
+    );
   };
 
-  const handleImportStudents = (newStudents: Omit<Student, 'id'>[]) => {
-    const res = storageService.importStudentsBatch(newStudents);
-    setStudents(res.students);
-    setAuditLogs(storageService.getAuditLogs());
-    return { added: res.added, skipped: res.skipped };
-  };
-
-  // Classes CRUD
-  const handleAddClass = (newClass: Omit<SchoolClass, 'id'>) => {
-    const updated = storageService.addClass(newClass);
-    setClasses(updated);
-    setUsers(storageService.getUsers());
-    setCurrentUser(storageService.getCurrentUser());
-    if (!selectedClassIdForMatrix && updated[0]) {
-      setSelectedClassIdForMatrix(updated[0].id);
+  const handleImportStudents = async (newStudents: Omit<Student, 'id'>[]) => {
+    if (!authUser) return { added: 0, skipped: newStudents.length };
+    setActionError(null);
+    try {
+      return await firestoreService.importStudentsBatch(
+        newStudents,
+        students,
+        classes,
+        actorForLogs,
+        authUser.uid
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gagal mengimpor siswa ke cloud.';
+      setActionError(msg);
+      return { added: 0, skipped: newStudents.length };
     }
-    setAuditLogs(storageService.getAuditLogs());
+  };
+
+  const handleAddClass = (newClass: Omit<SchoolClass, 'id'>) => {
+    if (!authUser) return;
+    void runCloudAction(async () => {
+      const created = await firestoreService.addClass(newClass, users, actorForLogs, authUser.uid);
+      syncedQrClassIdsRef.current.add(created.id);
+      if (!selectedClassIdForMatrix) {
+        setSelectedClassIdForMatrix(created.id);
+      }
+    });
   };
 
   const handleUpdateClass = (updatedClass: SchoolClass) => {
-    const updated = storageService.updateClass(updatedClass);
-    setClasses(updated);
-    setUsers(storageService.getUsers());
-    setCurrentUser(storageService.getCurrentUser());
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    void runCloudAction(() =>
+      firestoreService.updateClass(
+        updatedClass,
+        users,
+        students,
+        attendanceRecords,
+        teachingRecords,
+        archives,
+        actorForLogs,
+        authUser.uid
+      )
+    );
   };
 
   const handleDeleteClass = (id: string) => {
-    const updated = storageService.deleteClass(id);
-    setClasses(updated);
-    if (selectedClassIdForMatrix === id) {
-      setSelectedClassIdForMatrix(updated[0]?.id || '');
-    }
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    const target = classes.find((c) => c.id === id);
+    if (!target) return;
+    void runCloudAction(() =>
+      firestoreService.deleteClass(target, actorForLogs, authUser.uid)
+    );
   };
 
-  // Academic Years CRUD
+  const handleRegenerateClassQr = async (schoolClass: SchoolClass) => {
+    if (!authUser) return;
+    await runCloudAction(async () => {
+      await firestoreService.regenerateClassQr(schoolClass, actorForLogs, authUser.uid);
+    });
+  };
+
   const handleAddAcademicYear = (year: Omit<AcademicYear, 'id'>) => {
-    const updated = storageService.addAcademicYear(year);
-    setAcademicYears(updated);
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    void runCloudAction(() =>
+      firestoreService.addAcademicYear(
+        year,
+        academicYears,
+        calendarEvents,
+        actorForLogs,
+        authUser.uid
+      )
+    );
   };
 
   const handleSetActiveAcademicYear = (id: string) => {
-    const updated = storageService.setActiveAcademicYear(id);
-    setAcademicYears(updated);
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    void runCloudAction(() =>
+      firestoreService.setActiveAcademicYear(
+        id,
+        academicYears,
+        calendarEvents,
+        actorForLogs,
+        authUser.uid
+      )
+    );
   };
 
   const handleDeleteAcademicYear = (id: string) => {
-    const updated = storageService.deleteAcademicYear(id);
-    setAcademicYears(updated);
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    const target = academicYears.find((y) => y.id === id);
+    if (!target) return;
+    void runCloudAction(() =>
+      firestoreService.deleteAcademicYear(
+        target,
+        academicYears,
+        calendarEvents,
+        actorForLogs,
+        authUser.uid
+      )
+    );
   };
 
-  // Calendar Events CRUD
   const handleAddCalendarEvent = (event: Omit<AcademicCalendarEvent, 'id'>) => {
-    const updated = storageService.addCalendarEvent(event);
-    setCalendarEvents(updated);
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    void runCloudAction(() =>
+      firestoreService.addCalendarEvent(
+        event,
+        academicYears,
+        calendarEvents,
+        actorForLogs,
+        authUser.uid
+      )
+    );
   };
 
   const handleUpdateCalendarEvent = (event: AcademicCalendarEvent) => {
-    const updated = storageService.updateCalendarEvent(event);
-    setCalendarEvents(updated);
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    void runCloudAction(() =>
+      firestoreService.updateCalendarEvent(
+        event,
+        academicYears,
+        calendarEvents,
+        actorForLogs,
+        authUser.uid
+      )
+    );
   };
 
   const handleDeleteCalendarEvent = (id: string) => {
-    const updated = storageService.deleteCalendarEvent(id);
-    setCalendarEvents(updated);
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    const target = calendarEvents.find((e) => e.id === id);
+    if (!target) return;
+    void runCloudAction(() =>
+      firestoreService.deleteCalendarEvent(
+        target,
+        academicYears,
+        calendarEvents,
+        actorForLogs,
+        authUser.uid
+      )
+    );
   };
 
-  // Users CRUD
   const handleAddUser = (user: Omit<User, 'id'>) => {
-    storageService.addUser(user);
-    setUsers(storageService.getUsers());
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    void runCloudAction(async () => {
+      await firestoreService.addUser(user, actorForLogs, authUser.uid);
+    });
   };
 
   const handleUpdateUser = (user: User) => {
-    storageService.updateUser(user);
-    setUsers(storageService.getUsers());
-    setCurrentUser(storageService.getCurrentUser());
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    void runCloudAction(() =>
+      firestoreService.updateUser(user, actorForLogs, authUser.uid)
+    );
   };
 
   const handleDeleteUser = (id: string) => {
-    storageService.deleteUser(id);
-    setUsers(storageService.getUsers());
-    setAuditLogs(storageService.getAuditLogs());
+    if (!authUser) return;
+    const target = users.find((u) => u.id === id);
+    if (!target) return;
+    void runCloudAction(() =>
+      firestoreService.deleteUser(target, actorForLogs, authUser.uid)
+    );
   };
 
-  // Navigate from OPMDashboard cards/checklist
   const handleNavigateOPMSection = (target: OPMSection | string) => {
-    if (target === 'opm_settings' || target === 'attendance_matrix' || target === 'archives') {
+    if (
+      target === 'opm_settings' ||
+      target === 'attendance_matrix' ||
+      target === 'archives' ||
+      target === 'opm_qr_classes' ||
+      target === 'teaching_recap'
+    ) {
       setActiveTab(target);
       return;
     }
@@ -309,12 +582,15 @@ export default function App() {
     setActiveTab(tabMap[target as OPMSection] || target);
   };
 
-  // Open Archive Item (works across any month/class)
   const handleOpenArchiveReport = (item: ReportArchiveItem) => {
-    const targetRecapSummary = storageService.calculateClassRecap(
+    const targetRecapSummary = calculateClassRecapFromData(
       item.classId,
       item.month,
-      item.year
+      item.year,
+      classes,
+      students,
+      calendarEvents,
+      attendanceRecords
     );
     const matchedClass = classes.find((c) => c.id === item.classId);
     const matchingRecap = targetRecapSummary.recaps.find((r) => r.student.id === item.studentId);
@@ -362,6 +638,51 @@ export default function App() {
     return archives.filter((a) => a.classId === currentUser.assignedClassId);
   }, [archives, currentUser]);
 
+  const isAuthorizedStaff = Boolean(
+    resolvedProfile && (resolvedProfile.isAdmin || resolvedProfile.isBoundStaff)
+  );
+
+  // === VIEW 1: ENTRY PORTAL (Menu Login + Menu Kamera Scan) ===
+  if (portalView === 'portal' || (portalView === 'app' && !isAuthorizedStaff)) {
+    return (
+      <>
+        <EntryPortal
+          authUser={authUser}
+          authLoading={authLoading}
+          authError={authError}
+          isAuthorizedStaff={isAuthorizedStaff}
+          resolvedRoleLabel={
+            resolvedProfile?.isAdmin
+              ? 'Administrator / OPM'
+              : resolvedProfile?.appUser?.role === 'wali_kelas'
+              ? 'Wali Kelas'
+              : undefined
+          }
+          onGoogleLogin={() => handleGoogleLogin(true)}
+          onSignOut={handleSignOut}
+          onEnterDashboard={() => setPortalView('app')}
+          onOpenScanner={() => setPortalView('scanner')}
+        />
+        <OfflineIndicator />
+      </>
+    );
+  }
+
+  // === VIEW 2: CAMERA QR SCANNER (Guru Ngajar Check-in / Check-out) ===
+  if (portalView === 'scanner') {
+    return (
+      <>
+        <TeachingQRScanner
+          authUser={authUser}
+          onGoogleLogin={() => handleGoogleLogin(false)}
+          onBackToPortal={() => setPortalView(isAuthorizedStaff ? 'app' : 'portal')}
+        />
+        <OfflineIndicator />
+      </>
+    );
+  }
+
+  // === VIEW 3: MAIN ADMIN / WALI KELAS APPLICATION WORKSPACE ===
   return (
     <div className="min-h-screen bg-[#F6F8FB] flex font-sans text-[#0B192C]">
       {/* Persistent Left Sidebar + Mobile Drawer */}
@@ -372,6 +693,9 @@ export default function App() {
         setActiveTab={setActiveTab}
         isOpenMobile={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        onOpenScanner={() => setPortalView('scanner')}
+        onBackToPortal={() => setPortalView('portal')}
+        onSignOut={() => void handleSignOut()}
       />
 
       {/* Right Workspace Column */}
@@ -381,13 +705,34 @@ export default function App() {
           breadcrumbSection={currentMeta.section}
           activeAcademicYear={activeAcademicYear}
           currentUser={currentUser}
+          authEmail={authUser?.email || undefined}
+          canSwitchRoles={Boolean(resolvedProfile?.isAdmin)}
           users={users}
           classes={classes}
           onSwitchUser={handleSwitchUser}
           onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
+          onOpenScanner={() => setPortalView('scanner')}
+          onBackToPortal={() => setPortalView('portal')}
+          onSignOut={() => void handleSignOut()}
         />
 
         <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-7">
+          {actionError && (
+            <div className="mb-5 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{actionError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActionError(null)}
+                className="text-rose-700 hover:text-rose-900 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           {/* Wali Kelas Primary Dashboard */}
           {activeTab === 'dashboard' && currentUser.role === 'wali_kelas' && (
             <WaliKelasDashboard
@@ -395,6 +740,7 @@ export default function App() {
               schoolClass={activeClass}
               madrasah={madrasah}
               recapSummary={classRecap}
+              todayTeachingRecords={todayTeachingRecordsForActiveClass}
               selectedMonth={selectedMonth}
               selectedYear={selectedYear}
               onChangeMonthYear={(m, y) => {
@@ -414,6 +760,7 @@ export default function App() {
               }}
               onOpenBatchExport={() => setShowBatchExportModal(true)}
               onGoToMatrix={() => setActiveTab('attendance_matrix')}
+              onGoToTeachingRecap={() => setActiveTab('teaching_recap')}
             />
           )}
 
@@ -440,6 +787,7 @@ export default function App() {
               onAddClass={handleAddClass}
               onUpdateClass={handleUpdateClass}
               onDeleteClass={handleDeleteClass}
+              onRegenerateClassQr={handleRegenerateClassQr}
               onAddAcademicYear={handleAddAcademicYear}
               onSetActiveAcademicYear={handleSetActiveAcademicYear}
               onDeleteAcademicYear={handleDeleteAcademicYear}
@@ -452,12 +800,35 @@ export default function App() {
             />
           )}
 
+          {/* Barcode QR Generator & Poster Printer per Class (Admin) */}
+          {activeTab === 'opm_qr_classes' && currentUser.role === 'opm' && (
+            <ClassQrManagerView
+              classes={classes}
+              madrasah={madrasah}
+              onRegenerateQr={handleRegenerateClassQr}
+              onNavigateToClasses={() => setActiveTab('opm_classes')}
+            />
+          )}
+
+          {/* Rekap Guru Mengajar (Kedatangan & Selesai Ngajar) */}
+          {activeTab === 'teaching_recap' && (
+            <TeachingRecapView
+              currentUser={currentUser}
+              classes={classes}
+              teachingRecords={teachingRecords}
+              activeClass={activeClass}
+              onOpenQrManager={
+                currentUser.role === 'opm' ? () => setActiveTab('opm_qr_classes') : undefined
+              }
+            />
+          )}
+
           {/* Dedicated Madrasah Profile & Logo Upload Settings */}
           {activeTab === 'opm_settings' && currentUser.role === 'opm' && (
             <MadrasahSettingsView
               profile={madrasah}
               onSave={handleSaveProfile}
-              onResetAllData={() => storageService.resetAllData()}
+              onResetAllData={() => void runCloudAction(() => firestoreService.resetAllCloudData())}
             />
           )}
 
@@ -500,7 +871,7 @@ export default function App() {
               {madrasah.nsm ? ` · NSM ${madrasah.nsm}` : ''}
             </div>
             <div className="text-[11px] text-slate-400">
-              Platform Monitoring &amp; Laporan Presensi Siswa
+              Platform Monitoring &amp; Laporan Presensi Siswa · Cloud Sync
             </div>
           </div>
         </footer>
@@ -517,7 +888,6 @@ export default function App() {
           academicYear={activeAcademicYear?.year || '-'}
           semester={activeAcademicYear?.semester || '-'}
           onClose={() => setReportModalContext(null)}
-          onDelivered={() => setArchives(storageService.getArchives())}
         />
       )}
 
@@ -533,10 +903,7 @@ export default function App() {
           semester={activeAcademicYear?.semester || '-'}
           month={selectedMonth}
           year={selectedYear}
-          onClose={() => {
-            setShowBatchExportModal(false);
-            setArchives(storageService.getArchives());
-          }}
+          onClose={() => setShowBatchExportModal(false)}
         />
       )}
 
