@@ -24,10 +24,15 @@ import {
 } from '../../services/firestoreService';
 import { parseClassQrPayload } from '../../services/qrPoster';
 import { ClassQrCodeRegistry, TeachingAttendanceRecord } from '../../types';
+import { AuthErrorInfo } from '../../firebase';
+import { AuthErrorBanner } from '../auth/AuthErrorBanner';
 
 interface TeachingQRScannerProps {
   authUser: FirebaseAuthUser | null;
+  authError: AuthErrorInfo | null;
+  onDismissAuthError: () => void;
   onGoogleLogin: () => Promise<void>;
+  onGoogleRedirectLogin?: () => Promise<void>;
   onBackToPortal: () => void;
 }
 
@@ -50,7 +55,10 @@ const QUICK_SUBJECTS = [
 
 export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
   authUser,
+  authError,
+  onDismissAuthError,
   onGoogleLogin,
+  onGoogleRedirectLogin,
   onBackToPortal,
 }) => {
   const html5QrRef = useRef<Html5Qrcode | null>(null);
@@ -341,34 +349,43 @@ export const TeachingQRScanner: React.FC<TeachingQRScannerProps> = ({
 
         {/* Auth Gate if Guru hasn't signed in with Google yet */}
         {!authUser ? (
-          <div className="surface-card p-8 text-center max-w-lg mx-auto space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center mx-auto">
-              <Camera className="w-6 h-6" />
+          <div className="space-y-4 max-w-lg mx-auto">
+            {authError && (
+              <AuthErrorBanner
+                error={authError}
+                onDismiss={onDismissAuthError}
+                onTryRedirectLogin={onGoogleRedirectLogin}
+              />
+            )}
+            <div className="surface-card p-8 text-center space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center mx-auto">
+                <Camera className="w-6 h-6" />
+              </div>
+              <div className="space-y-1.5">
+                <h2 className="text-base font-bold text-[#0B192C]">
+                  Verifikasi Akun Google untuk Kamera Scan
+                </h2>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Masuk 1 kali dengan akun Google Anda agar identitas guru dan waktu kehadiran mengajar tercatat resmi ke dashboard Wali Kelas.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isLoggingIn}
+                onClick={async () => {
+                  setIsLoggingIn(true);
+                  try {
+                    await onGoogleLogin();
+                  } finally {
+                    setIsLoggingIn(false);
+                  }
+                }}
+                className="inline-flex items-center justify-center gap-2 btn-emerald px-5 py-3 rounded-xl text-xs font-semibold cursor-pointer disabled:opacity-60"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>{isLoggingIn ? 'Menghubungkan Google...' : 'Masuk dengan Google & Buka Scan'}</span>
+              </button>
             </div>
-            <div className="space-y-1.5">
-              <h2 className="text-base font-bold text-[#0B192C]">
-                Verifikasi Akun Google untuk Kamera Scan
-              </h2>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Masuk 1 kali dengan akun Google Anda agar identitas guru dan waktu kehadiran mengajar tercatat resmi ke dashboard Wali Kelas.
-              </p>
-            </div>
-            <button
-              type="button"
-              disabled={isLoggingIn}
-              onClick={async () => {
-                setIsLoggingIn(true);
-                try {
-                  await onGoogleLogin();
-                } finally {
-                  setIsLoggingIn(false);
-                }
-              }}
-              className="inline-flex items-center justify-center gap-2 btn-emerald px-5 py-3 rounded-xl text-xs font-semibold cursor-pointer disabled:opacity-60"
-            >
-              <LogIn className="w-4 h-4" />
-              <span>{isLoggingIn ? 'Menghubungkan Google...' : 'Masuk dengan Google & Buka Scan'}</span>
-            </button>
           </div>
         ) : (
           <>

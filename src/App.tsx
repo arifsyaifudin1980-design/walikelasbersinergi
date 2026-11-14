@@ -1,7 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, User as FirebaseAuthUser } from 'firebase/auth';
+import {
+  getRedirectResult,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
+  User as FirebaseAuthUser,
+} from 'firebase/auth';
 import { AlertCircle, X } from 'lucide-react';
-import { auth, googleProvider } from './firebase';
+import {
+  auth,
+  AuthErrorInfo,
+  formatFirebaseAuthError,
+  googleProvider,
+  isRunningInIframe,
+} from './firebase';
 import {
   AcademicCalendarEvent,
   AcademicYear,
@@ -50,6 +63,8 @@ interface ReportModalContext {
 
 type PortalView = 'portal' | 'scanner' | 'app';
 
+const REDIRECT_TARGET_KEY = 'ppm_post_redirect_view';
+
 const TAB_META: Record<string, { title: string; section: string }> = {
   opm_overview: { title: 'Ringkasan Sistem', section: 'Utama' },
   dashboard: { title: 'Dashboard Kelas', section: 'Utama' },
@@ -82,7 +97,7 @@ export default function App() {
   const [portalView, setPortalView] = useState<PortalView>('portal');
   const [authUser, setAuthUser] = useState<FirebaseAuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<AuthErrorInfo | null>(null);
   const [resolvedProfile, setResolvedProfile] = useState<ResolvedAuthProfile | null>(null);
   const [previewUserId, setPreviewUserId] = useState<string | null>(null);
   const enterAppAfterLoginRef = useRef<boolean>(false);
@@ -115,11 +130,44 @@ export default function App() {
   const [showBatchExportModal, setShowBatchExportModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
 
-  // Listen to Firebase Authentication State
+  // Listen to Firebase Authentication State & Capture Redirect Flow Result
   useEffect(() => {
+    let isMounted = true;
+
+    if (!isRunningInIframe()) {
+      void getRedirectResult(auth)
+        .then((result) => {
+          if (!isMounted || !result?.user) return;
+          try {
+            const pendingTarget = sessionStorage.getItem(REDIRECT_TARGET_KEY);
+            if (pendingTarget === 'app') {
+              enterAppAfterLoginRef.current = true;
+            } else if (pendingTarget === 'scanner') {
+              setPortalView('scanner');
+            }
+            sessionStorage.removeItem(REDIRECT_TARGET_KEY);
+          } catch {
+            // ignore sessionStorage error
+          }
+        })
+        .catch((err) => {
+          if (!isMounted) return;
+          try {
+            sessionStorage.removeItem(REDIRECT_TARGET_KEY);
+          } catch {
+            // ignore
+          }
+          const code = (err as { code?: string })?.code || '';
+          if (code === 'auth/popup-closed-by-user' || code === 'auth/user-cancelled') {
+            return;
+          }
+          setAuthError(formatFirebaseAuthError(err));
+        });
+    }
+
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (!isMounted) return;
       setAuthUser(fbUser);
-      setAuthError(null);
       if (!fbUser) {
         setResolvedProfile(null);
         setPreviewUserId(null);
@@ -137,9 +185,24 @@ export default function App() {
         return;
       }
 
+      setAuthError(null);
+      try {
+        const pendingTarget = sessionStorage.getItem(REDIRECT_TARGET_KEY);
+        if (pendingTarget === 'app') {
+          enterAppAfterLoginRef.current = true;
+          sessionStorage.removeItem(REDIRECT_TARGET_KEY);
+        } else if (pendingTarget === 'scanner') {
+          setPortalView('scanner');
+          sessionStorage.removeItem(REDIRECT_TARGET_KEY);
+        }
+      } catch {
+        // ignore sessionStorage error
+      }
+
       setAuthLoading(true);
       try {
         const resolved = await firestoreService.resolveUserSession(fbUser);
+        if (!isMounted) return;
         setResolvedProfile(resolved);
         setPreviewUserId(null);
 
@@ -153,15 +216,25 @@ export default function App() {
           enterAppAfterLoginRef.current = false;
         }
       } catch (err) {
+        if (!isMounted) return;
         const msg = err instanceof Error ? err.message : 'Gagal memverifikasi akun Google Anda.';
-        setAuthError(msg);
+        setAuthError({
+          code: 'auth/session-verify-failed',
+          title: 'Verifikasi Akun Gagal',
+          message: msg,
+        });
         enterAppAfterLoginRef.current = false;
       } finally {
-        setAuthLoading(false);
+        if (isMounted) {
+          setAuthLoading(false);
+        }
       }
     });
 
-    return () => unsub();
+    return () => {
+      isMounted = false;
+      unsub();
+    };
   }, []);
 
   // Subscribe to Firestore Cloud Collections once staff session is verified
@@ -212,7 +285,7 @@ export default function App() {
     void firestoreService.syncMissingTeachingHomeroomUid(classes, teachingRecords);
   }, [resolvedProfile?.isAdmin, classes, teachingRecords]);
 
-  // Trigger Google Login Popup
+  // Trigger Google Login Popup (Primary, required for AI Studio iframe & custom domains)
   const handleGoogleLogin = async (enterDashboardOnSuccess: boolean) => {
     setAuthError(null);
     enterAppAfterLoginRef.current = enterDashboardOnSuccess;
@@ -221,10 +294,27 @@ export default function App() {
     } catch (err) {
       enterAppAfterLoginRef.current = false;
       const code = (err as { code?: string })?.code || '';
-      if (code === 'auth/popup-closed-by-user') {
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/user-cancelled') {
         return;
       }
-      setAuthError('Login Google dibatalkan atau gagal. Pastikan pop-up diizinkan browser.');
+      setAuthError(formatFirebaseAuthError(err));
+    }
+  };
+
+  // Fallback Redirect Login when running directly on top-level custom domain (outside iframe)
+  const handleGoogleRedirectLogin = async (targetView: 'app' | 'scanner') => {
+    if (isRunningInIframe()) return;
+    setAuthError(null);
+    try {
+      sessionStorage.setItem(REDIRECT_TARGET_KEY, targetView);
+      await signInWithRedirect(auth, googleProvider);
+    } catch (err) {
+      try {
+        sessionStorage.removeItem(REDIRECT_TARGET_KEY);
+      } catch {
+        // ignore
+      }
+      setAuthError(formatFirebaseAuthError(err));
     }
   };
 
@@ -650,6 +740,7 @@ export default function App() {
           authUser={authUser}
           authLoading={authLoading}
           authError={authError}
+          onDismissAuthError={() => setAuthError(null)}
           isAuthorizedStaff={isAuthorizedStaff}
           resolvedRoleLabel={
             resolvedProfile?.isAdmin
@@ -659,6 +750,9 @@ export default function App() {
               : undefined
           }
           onGoogleLogin={() => handleGoogleLogin(true)}
+          onGoogleRedirectLogin={
+            !isRunningInIframe() ? () => handleGoogleRedirectLogin('app') : undefined
+          }
           onSignOut={handleSignOut}
           onEnterDashboard={() => setPortalView('app')}
           onOpenScanner={() => setPortalView('scanner')}
@@ -674,7 +768,12 @@ export default function App() {
       <>
         <TeachingQRScanner
           authUser={authUser}
+          authError={authError}
+          onDismissAuthError={() => setAuthError(null)}
           onGoogleLogin={() => handleGoogleLogin(false)}
+          onGoogleRedirectLogin={
+            !isRunningInIframe() ? () => handleGoogleRedirectLogin('scanner') : undefined
+          }
           onBackToPortal={() => setPortalView(isAuthorizedStaff ? 'app' : 'portal')}
         />
         <OfflineIndicator />

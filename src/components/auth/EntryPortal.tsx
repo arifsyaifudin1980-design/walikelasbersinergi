@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import {
-  AlertCircle,
   ArrowRight,
   CheckCircle2,
   LogIn,
@@ -12,14 +11,18 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { User as FirebaseAuthUser } from 'firebase/auth';
+import { AuthErrorInfo } from '../../firebase';
+import { AuthErrorBanner } from './AuthErrorBanner';
 
 interface EntryPortalProps {
   authUser: FirebaseAuthUser | null;
   authLoading: boolean;
-  authError: string | null;
+  authError: AuthErrorInfo | null;
+  onDismissAuthError: () => void;
   isAuthorizedStaff: boolean;
   resolvedRoleLabel?: string;
   onGoogleLogin: () => Promise<void>;
+  onGoogleRedirectLogin?: () => Promise<void>;
   onSignOut: () => Promise<void>;
   onEnterDashboard: () => void;
   onOpenScanner: () => void;
@@ -29,9 +32,11 @@ export const EntryPortal: React.FC<EntryPortalProps> = ({
   authUser,
   authLoading,
   authError,
+  onDismissAuthError,
   isAuthorizedStaff,
   resolvedRoleLabel,
   onGoogleLogin,
+  onGoogleRedirectLogin,
   onSignOut,
   onEnterDashboard,
   onOpenScanner,
@@ -135,13 +140,11 @@ export const EntryPortal: React.FC<EntryPortalProps> = ({
           </div>
 
           {authError && (
-            <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-start gap-3">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <div className="font-bold">Kendala Autentikasi</div>
-                <p className="text-rose-800 leading-relaxed">{authError}</p>
-              </div>
-            </div>
+            <AuthErrorBanner
+              error={authError}
+              onDismiss={onDismissAuthError}
+              onTryRedirectLogin={onGoogleRedirectLogin}
+            />
           )}
 
           {/* Two Primary Entry Menus: Login & Kamera Scan */}
